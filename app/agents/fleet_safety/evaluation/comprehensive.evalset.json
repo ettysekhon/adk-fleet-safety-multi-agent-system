@@ -1,0 +1,108 @@
+
+{
+  "eval_set_id": "fleet_safety_comprehensive_suite",
+  "eval_cases": [
+    {
+      "eval_id": "route_plan_safety_priority",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Plan a safe route for vehicle v001 driven by d001 from London to Cambridge. Prioritize safety above all else."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "request_route_plan",
+                "args": {
+                  "origin": "London",
+                  "destination": "Cambridge",
+                  "driver_id": "d001",
+                  "vehicle_id": "v001",
+                  "priority": "safety"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "eval_id": "route_plan_speed_priority",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "I need to get vehicle v001 to Cambridge from London as fast as possible. Driver is d001."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "request_route_plan",
+                "args": {
+                  "origin": "London",
+                  "destination": "Cambridge",
+                  "driver_id": "d001",
+                  "vehicle_id": "v001",
+                  "priority": "time"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "eval_id": "dashboard_generation",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Generate an executive dashboard for today."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "generate_executive_dashboard",
+                "args": {}
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "eval_id": "check_vehicle_safety",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Check the safety status for vehicle v001."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "check_vehicle_safety",
+                "args": {
+                  "vehicle_id": "v001"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

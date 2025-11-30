@@ -1,0 +1,38 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python3",
+  "python.formatting.provider": "black",
+  "python.formatting.blackArgs": ["--line-length", "100"],
+  "python.linting.enabled": true,
+  "python.linting.ruffEnabled": true,
+  "python.linting.ruffArgs": ["--line-length", "100"],
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.organizeImports": "always",
+    "source.fixAll": "always"
+  },
+  "ruff.enable": true,
+  "ruff.path": ["${workspaceFolder}/.venv/bin/ruff"],
+  "terminal.integrated.env.osx": {
+    "PYTHONPATH": "${workspaceFolder}"
+  },
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/.venv/lib/python3.12/site-packages",
+    "app",
+    "app/agents",
+    "app/helpers",
+    "app/models",
+    "app/utils",
+    "tests/integration",
+    "tests/unit"
+  ],
+  "cursorpyright.analysis.extraPaths": [
+    "${workspaceFolder}/.venv/lib/python3.12/site-packages",
+    "app",
+    "app/app_utils",
+    "app/agents",
+    "app/helpers",
+    "tests/integration",
+    "tests/unit"
+  ],
+  "python.analysis.typeCheckingMode": "basic"
+}

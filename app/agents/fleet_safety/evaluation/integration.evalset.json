@@ -1,0 +1,40 @@
+{
+  "eval_set_id": "fleet_safety_integration_suite",
+  "eval_cases": [
+    {
+      "eval_id": "safe_route_london_cambridge",
+      "conversation": [
+        {
+          "user_content": {
+            "parts": [
+              {
+                "text": "Plan a safe route for vehicle v001 (Heavy Truck) driven by driver d001 from London to Cambridge leaving now."
+              }
+            ]
+          },
+          "final_response": {
+            "parts": [
+              {
+                "text": "I have analysed the routes. The safest recommended route is via the M11, which has the highest safety score."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "request_route_plan",
+                "args": {
+                  "origin": "London",
+                  "destination": "Cambridge",
+                  "driver_id": "d001",
+                  "vehicle_id": "v001",
+                  "priority": "safety"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
