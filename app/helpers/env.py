@@ -53,12 +53,13 @@ def load_env_and_verify_api_key(require_maps_key: bool = False):
     # Check if running in Agent Engine - uses Vertex AI auth, not API key
     if is_running_in_agent_engine():
         logger.info("Running in Agent Engine - using Vertex AI authentication")
-        # Still check for Maps API key if required
-        if require_maps_key:
+        # If MCP_SERVER_URL is set, we use remote MCP - no Maps API key needed
+        if require_maps_key and not os.getenv("MCP_SERVER_URL"):
             google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
             if not google_maps_api_key:
                 raise ValueError(
-                    "GOOGLE_MAPS_API_KEY is not set but required. Please set it in deployment env vars."
+                    "GOOGLE_MAPS_API_KEY is not set and MCP_SERVER_URL not configured. "
+                    "Set one of these in deployment env vars."
                 )
         return None  # No API key needed in Agent Engine
 
@@ -72,13 +73,13 @@ def load_env_and_verify_api_key(require_maps_key: bool = False):
             "- Environment variables (for deployed environments)"
         )
 
-    if require_maps_key:
+    # If MCP_SERVER_URL is set, we use remote MCP - no Maps API key needed
+    if require_maps_key and not os.getenv("MCP_SERVER_URL"):
         google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY")
         if not google_maps_api_key:
             raise ValueError(
-                "GOOGLE_MAPS_API_KEY is not set but required for this script. Please set it in:\n"
-                "- A .env file (for local development)\n"
-                "- Environment variables (for deployed environments)"
+                "GOOGLE_MAPS_API_KEY is not set and MCP_SERVER_URL not configured. "
+                "Set one of these for MCP access."
             )
 
     return google_api_key
