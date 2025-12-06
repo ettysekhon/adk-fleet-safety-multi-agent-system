@@ -37,7 +37,7 @@ resource "github_repository" "repo" {
   allow_merge_commit = true
   allow_squash_merge = true
   allow_rebase_merge = true
-  
+
   auto_init = false
 }
 

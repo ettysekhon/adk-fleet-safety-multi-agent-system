@@ -9,22 +9,16 @@ from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
-# Import your specific agents
 from app.agents.fleet_safety.analytics_agent import AnalyticsAgent
 from app.agents.fleet_safety.dynamic_rerouter_agent import DynamicRerouterAgent
 from app.agents.fleet_safety.orchestrator import FleetSafetyOrchestrator
 from app.agents.fleet_safety.risk_monitor_agent import RiskMonitorAgent
 from app.agents.fleet_safety.route_planner_agent import RoutePlannerAgent
 from app.agents.fleet_safety.safety_scorer_agent import SafetyScorerAgent
-
-# Import helpers
 from app.helpers.env import load_env_and_verify_api_key
 
-# Suppress Pydantic warnings if any
 warnings.filterwarnings("ignore", category=UserWarning, module="pydantic")
 
-# --- Configuration ---
-# Load environment variables
 try:
     from dotenv import load_dotenv
 
@@ -32,7 +26,6 @@ try:
 except ImportError:
     pass
 
-# Verify API Key
 load_env_and_verify_api_key(require_maps_key=True)
 
 
@@ -128,12 +121,12 @@ class MCPClientWrapper:
         return str(result)
 
 
-# --- Agent Initialization ---
+# --- Agent Initialisation ---
 
-# Initialize MCP
+# Initialise MCP
 mcp_client = MCPClientWrapper()
 
-# Initialize Specialist Agents
+# Initialise Specialist Agents
 print("Initializing Fleet Safety Agents...")
 route_planner = RoutePlannerAgent(mcp_client=mcp_client)
 safety_scorer = SafetyScorerAgent(mcp_client=mcp_client)
@@ -141,7 +134,7 @@ risk_monitor = RiskMonitorAgent(mcp_client=mcp_client)
 analytics = AnalyticsAgent(mcp_client=mcp_client)
 rerouter = DynamicRerouterAgent(mcp_client=mcp_client)
 
-# Initialize Orchestrator
+# Initialise Orchestrator
 orchestrator = FleetSafetyOrchestrator()
 orchestrator.register_agents(
     {
@@ -153,7 +146,7 @@ orchestrator.register_agents(
     }
 )
 
-# Initialize Mock State (Demo Data)
+# Initialise Mock State (Demo Data)
 orchestrator.fleet_state["vehicles"]["v001"] = {
     "id": "v001",
     "type": "HGV",

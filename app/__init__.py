@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .agent import app
-
-__all__ = ["app"]
-
+# Note: We don't auto-import app here to avoid triggering env validation
+# at import time (which breaks unit tests that mock the environment).
+# Import explicitly: from app.agent import app

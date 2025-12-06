@@ -30,9 +30,7 @@ from vertexai._genai import _agent_engines_utils
 from vertexai._genai.types import AgentEngine, AgentEngineConfig
 
 # Suppress google-cloud-storage version compatibility warning
-warnings.filterwarnings(
-    "ignore", category=FutureWarning, module="google.cloud.aiplatform"
-)
+warnings.filterwarnings("ignore", category=FutureWarning, module="google.cloud.aiplatform")
 
 
 def generate_class_methods_from_agent(agent_instance: Any) -> list[dict[str, Any]]:
@@ -40,9 +38,7 @@ def generate_class_methods_from_agent(agent_instance: Any) -> list[dict[str, Any
 
     See: https://docs.cloud.google.com/agent-builder/agent-engine/use/custom#supported-operations
     """
-    registered_operations = _agent_engines_utils._get_registered_operations(
-        agent=agent_instance
-    )
+    registered_operations = _agent_engines_utils._get_registered_operations(agent=agent_instance)
     class_methods_spec = _agent_engines_utils._generate_class_methods_spec_or_raise(
         agent=agent_instance,
         operations=registered_operations,
@@ -66,8 +62,14 @@ def parse_key_value_pairs(kv_string: str | None) -> dict[str, str]:
     return result
 
 
-def load_env_file(env_file_path: str | None, app_directory: str) -> dict[str, str]:
-    """Load environment variables from a .env file and return as dictionary."""
+def load_env_file(
+    env_file_path: str | None, app_directory: str
+) -> tuple[dict[str, str], str | None]:
+    """Load environment variables from a .env file and return as dictionary.
+
+    Returns:
+        Tuple of (filtered_env_vars, google_cloud_region)
+    """
     # Determine which .env file to use
     if env_file_path:
         target_file = env_file_path
@@ -77,17 +79,20 @@ def load_env_file(env_file_path: str | None, app_directory: str) -> dict[str, st
     if not os.path.exists(target_file):
         if env_file_path:  # Only warn if a specific file was explicitly provided
             logging.warning(f"Specified env file not found: {target_file}")
-        return {}
+        return {}, None
 
     logging.info(f"Loading environment variables from {target_file}")
     env_vars = dotenv_values(target_file)
+
+    # Extract GOOGLE_CLOUD_REGION before filtering
+    google_cloud_region = env_vars.get("GOOGLE_CLOUD_REGION")
 
     # Filter out reserved/conflicting variables
     # - GOOGLE_CLOUD_* are managed by the deployment
     # - GOOGLE_API_KEY conflicts with Vertex AI service account auth
     filtered_vars = {}
     reserved_keys = {"GOOGLE_API_KEY"}  # Conflicts with Vertex AI auth
-    
+
     for key, value in env_vars.items():
         if value is None:
             continue
@@ -99,7 +104,7 @@ def load_env_file(env_file_path: str | None, app_directory: str) -> dict[str, st
             continue
         filtered_vars[key] = value
 
-    return filtered_vars
+    return filtered_vars, google_cloud_region
 
 
 def write_deployment_metadata(
@@ -135,9 +140,7 @@ def print_deployment_success(
     if service_account:
         print(f"Service Account: {service_account}")
     else:
-        default_sa = (
-            f"service-{project_number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
-        )
+        default_sa = f"service-{project_number}@gcp-sa-aiplatform-re.iam.gserviceaccount.com"
         print(f"Service Account: {default_sa}")
     playground_url = f"https://console.cloud.google.com/vertex-ai/agents/locations/{location}/agent-engines/{agent_engine_id}/playground?project={project}"
     print(f"\n📊 Open Console Playground: {playground_url}\n")
@@ -268,7 +271,12 @@ def deploy_agent_engine_app(
     app_directory = entrypoint_module.split(".")[0]
 
     # Load environment variables from .env file first
-    env_vars = load_env_file(env_file, app_directory)
+    env_vars, env_region = load_env_file(env_file, app_directory)
+
+    # Use region from .env if --location wasn't explicitly provided
+    if location == "us-central1" and env_region:  # us-central1 is the Click default
+        location = env_region
+        logging.info(f"Using GOOGLE_CLOUD_REGION from .env: {location}")
 
     # Parse and merge CLI environment variables (these take precedence)
     cli_env_vars = parse_key_value_pairs(set_env_vars)
@@ -293,16 +301,10 @@ def deploy_agent_engine_app(
     if not project:
         _, project = google.auth.default()
 
-    print("""
-    ╔═══════════════════════════════════════════════════════════╗
-    ║                                                           ║
-    ║   🤖 DEPLOYING AGENT TO VERTEX AI AGENT ENGINE 🤖         ║
-    ║                                                           ║
-    ╚═══════════════════════════════════════════════════════════╝
-    """)
+    print("DEPLOYING AGENT TO VERTEX AI AGENT ENGINE")
 
     # Log deployment parameters
-    click.echo("\n📋 Deployment Parameters:")
+    click.echo("\n Deployment Parameters:")
     click.echo(f"  Project: {project}")
     click.echo(f"  Location: {location}")
     click.echo(f"  Display Name: {display_name}")
@@ -314,20 +316,18 @@ def deploy_agent_engine_app(
     if service_account:
         click.echo(f"  Service Account: {service_account}")
     if env_vars:
-        click.echo("\n🌍 Environment Variables:")
+        click.echo("\n Environment Variables:")
         for key, value in sorted(env_vars.items()):
             click.echo(f"  {key}: {value}")
 
     source_packages_list = list(source_packages)
 
-    # Initialize vertexai client
+    # Initialise vertexai client
     client = vertexai.Client(
         project=project,
         location=location,
     )
     vertexai.init(project=project, location=location)
-
-    # Add agent garden labels if configured
 
     # Dynamically import the agent instance to generate class_methods
     logging.info(f"Importing {entrypoint_module}.{entrypoint_object}")
@@ -362,18 +362,16 @@ def deploy_agent_engine_app(
     # Check if an agent with this name already exists
     existing_agents = list(client.agent_engines.list())
     matching_agents = [
-        agent
-        for agent in existing_agents
-        if agent.api_resource.display_name == display_name
+        agent for agent in existing_agents if agent.api_resource.display_name == display_name
     ]
 
     # Deploy the agent (create or update)
     if matching_agents:
-        click.echo(f"\n📝 Updating existing agent: {display_name}")
+        click.echo(f"\n Updating existing agent: {display_name}")
     else:
-        click.echo(f"\n🚀 Creating new agent: {display_name}")
+        click.echo(f"\n Creating new agent: {display_name}")
 
-    click.echo("🚀 Deploying to Vertex AI Agent Engine (this can take 3-5 minutes)...")
+    click.echo("Deploying to Vertex AI Agent Engine (this can take 3-5 minutes)...")
     if matching_agents:
         remote_agent = client.agent_engines.update(
             name=matching_agents[0].api_resource.name, config=config

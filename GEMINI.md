@@ -1,5 +1,3 @@
-Coding Agent guidance:
-
 # Google Agent Development Kit (ADK) Python Cheatsheet
 
 This document serves as a long-form, comprehensive reference for building, orchestrating, and deploying AI agents using the Python Agent Development Kit (ADK). It aims to cover every significant aspect with greater detail, more code examples, and in-depth best practices.
@@ -145,7 +143,7 @@ ADK allows you to define agents, tools, and even multi-agent workflows using a s
     # For Google AI Studio (simpler setup)
     GOOGLE_GENAI_USE_VERTEXAI=0
     GOOGLE_API_KEY=<your-Google-Gemini-API-key>
-    
+
     # For Google Cloud Vertex AI (production)
     GOOGLE_GENAI_USE_VERTEXAI=1
     GOOGLE_CLOUD_PROJECT=<your_gcp_project>
@@ -199,9 +197,9 @@ ADK allows you to define agents, tools, and even multi-agent workflows using a s
     description: Learning assistant that provides tutoring in code and math.
     instruction: |
       You are a learning assistant that helps students with coding and math questions.
-      
+
       You delegate coding questions to the code_tutor_agent and math questions to the math_tutor_agent.
-      
+
       Follow these steps:
       1. If the user asks about programming or coding, delegate to the code_tutor_agent.
       2. If the user asks about math concepts or problems, delegate to the math_tutor_agent.
@@ -418,7 +416,7 @@ The `instruction` is critical. It guides the LLM's behavior, persona, and tool u
 
 ```python
 import datetime
-from google.adk.tools import google_search   
+from google.adk.tools import google_search
 
 
 plan_generator = LlmAgent(
@@ -948,7 +946,7 @@ Tools extend an agent's abilities beyond text generation.
             years (int): The number of years the money is invested.
             compounding_frequency (int): The number of times interest is compounded
                                          per year (e.g., 1 for annually, 12 for monthly).
-            
+
         Returns:
             dict: Contains the calculation result.
                   - 'status' (str): "success" or "error".
@@ -1098,17 +1096,17 @@ from google.genai import types
 config = RunConfig(
     # Safety limits
     max_llm_calls=100,  # Prevent infinite agent loops
-    
+
     # Streaming & Modality
     response_modalities=["AUDIO", "TEXT"], # Request specific output formats
-    
+
     # Voice configuration (for AUDIO modality)
     speech_config=types.SpeechConfig(
         voice_config=types.VoiceConfig(
             prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name="Kore")
         )
     ),
-    
+
     # Debugging
     save_input_blobs_as_artifacts=True # Save uploaded files to ArtifactService
 )
@@ -1340,10 +1338,10 @@ Fully managed, scalable service for ADK agents on Google Cloud.
 
     ```python
     from vertexai.preview import reasoning_engines # or agent_engines directly in later versions
-    
+
     # Wrap your root_agent for deployment
     app_for_engine = reasoning_engines.AdkApp(agent=root_agent, enable_tracing=True)
-    
+
     # Deploy
     remote_app = agent_engines.create(
         agent_engine=app_for_engine,
@@ -1520,17 +1518,17 @@ Multi-layered defense against harmful content, misalignment, and unsafe actions.
 * **One-Line Observability Integrations**: ADK has native hooks for popular tracing platforms.
   * **AgentOps**:
 
-        ```python
-        import agentops
-        agentops.init(api_key="...") # Automatically instruments ADK agents
-        ```
+    ```python
+    import agentops
+    agentops.init(api_key="...") # Automatically instruments ADK agents
+    ```
 
   * **Arize Phoenix**:
 
-        ```python
-        from phoenix.otel import register
-        register(project_name="my_agent", auto_instrument=True)
-        ```
+    ```python
+    from phoenix.otel import register
+    register(project_name="my_agent", auto_instrument=True)
+    ```
 
   * **Google Cloud Trace**: Enable via flag during deployment: `adk deploy [cloud_run|agent_engine] --trace_to_cloud ...`
 * **Session History (`session.events`)**: Persisted for detailed post-mortem analysis.
@@ -1541,7 +1539,7 @@ Multi-layered defense against harmful content, misalignment, and unsafe actions.
 
 ADK supports real-time, bidirectional communication for interactive experiences like live voice conversations.
 
-#### Bidirectional Streaming Loop (`run_live`)
+### Bidirectional Streaming Loop (`run_live`)
 
 For real-time voice/video, use `run_live` with a `LiveRequestQueue`. This enables low-latency, two-way communication where the user can interrupt the agent.
 
@@ -1553,7 +1551,7 @@ from google.adk.agents.run_config import RunConfig
 async def start_streaming_session(runner, session, user_id):
     # 1. Configure modalities (e.g., AUDIO output for voice agents)
     run_config = RunConfig(response_modalities=["AUDIO"])
-    
+
     # 2. Create input queue for client data (audio chunks, text)
     live_queue = LiveRequestQueue()
 
@@ -1576,7 +1574,7 @@ async def start_streaming_session(runner, session, user_id):
                 elif part.text:
                      # Send text to client
                      await client.send_text(part.text)
-            
+
             # Handle turn signals
             if event.turn_complete:
                  pass # Signal client that agent finished speaking
@@ -1591,30 +1589,30 @@ async def start_streaming_session(runner, session, user_id):
 * **Streaming Tools**: A special type of `FunctionTool` that can stream intermediate results back to the agent.
   * **Definition**: Must be an `async` function with a return type of `AsyncGenerator`.
 
-        ```python
-        from typing import AsyncGenerator
+    ```python
+    from typing import AsyncGenerator
 
-        async def monitor_stock_price(symbol: str) -> AsyncGenerator[str, None]:
-            """Yields stock price updates as they occur."""
-            while True:
-                price = await get_live_price(symbol)
-                yield f"Update for {symbol}: ${price}"
-                await asyncio.sleep(5)
-        ```
+    async def monitor_stock_price(symbol: str) -> AsyncGenerator[str, None]:
+        """Yields stock price updates as they occur."""
+        while True:
+            price = await get_live_price(symbol)
+            yield f"Update for {symbol}: ${price}"
+            await asyncio.sleep(5)
+    ```
 
 * **Advanced I/O Modalities**: ADK (especially with Gemini Live API models) supports richer interactions.
   * **Audio**: Input via `Blob(mime_type="audio/pcm", data=bytes)`, Output via `genai_types.SpeechConfig` in `RunConfig`.
   * **Vision (Images/Video)**: Input via `Blob(mime_type="image/jpeg", data=bytes)` or `Blob(mime_type="video/mp4", data=bytes)`. Models like `gemini-2.5-flash-exp` can process these.
   * **Multimodal Input in `Content`**:
 
-        ```python
-        multimodal_content = genai_types.Content(
-            parts=[
-                genai_types.Part(text="Describe this image:"),
-                genai_types.Part(inline_data=genai_types.Blob(mime_type="image/jpeg", data=image_bytes))
-            ]
-        )
-        ```
+    ```python
+    multimodal_content = genai_types.Content(
+        parts=[
+            genai_types.Part(text="Describe this image:"),
+            genai_types.Part(inline_data=genai_types.Blob(mime_type="image/jpeg", data=image_bytes))
+        ]
+    )
+    ```
 
 ---
 
@@ -1676,7 +1674,7 @@ async def main():
         user_id="test_user",
         session_id="test_session",
         new_message=genai_types.Content(
-            role="user", 
+            role="user",
             parts=[genai_types.Part.from_text(text=query)]
         ),
     ):
@@ -1702,7 +1700,8 @@ For detailed specifications of all classes, methods, and commands, refer to the 
 
 ---
 
-**llm.txt** documents the "Agent Starter Pack" repository, providing a source of truth on its purpose, features, and usage
+llm.txt documents the "Agent Starter Pack" repository, providing a source of truth on its purpose, features, and usage
+
 ---
 
 ### Section 1: Project Overview
@@ -2058,7 +2057,7 @@ Before finalizing any `new_string` for a `replace` operation, meticulously verif
 1. **Target Identification:** Clearly define the exact lines or expressions to be changed, based *solely* on the user's explicit instructions.
 2. **Preservation Check:** Compare your proposed `new_string` against the `old_string`. Ensure all code, configuration values (e.g., `model`, `version`, `api_key`), comments, and formatting *outside* the identified target remain identical and verbatim.
 
-**Example: Adhering to Preservation**
+###  Example: Adhering to Preservation
 
 * **User Request:** "Change the agent's instruction to be a recipe suggester."
 * **Original Code Snippet:**

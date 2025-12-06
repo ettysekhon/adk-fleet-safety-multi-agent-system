@@ -12,7 +12,6 @@ dependencies = [
     "google-cloud-logging>=3.12.0,<4.0.0",
     "google-cloud-aiplatform[evaluation,agent-engines]>=1.118.0,<2.0.0",
     "protobuf>=6.31.1,<7.0.0",
-    # Fleet Safety Specific Dependencies
     "a2a-sdk>=0.3.16",
     "google-maps-mcp-server",
     "httpx>=0.27.0",
@@ -33,6 +32,8 @@ dev = [
     "ipykernel>=7.1.0",
     "isort>=7.0.0",
     "locust>=2.42.6",
+    "ruff>=0.14.4",
+    "pre-commit>=4.5.0",
 ]
 
 [project.optional-dependencies]
@@ -55,7 +56,19 @@ target-version = "py310"
 select = [
     "E", "F", "W", "I", "C", "B", "UP", "RUF", "N", "SIM", "TID"
 ]
-ignore = ["E501", "C901", "B006", "W292"]
+ignore = [
+    "E501",   # Line too long
+    "C901",   # Too complex
+    "B006",   # Mutable default argument
+    "W292",   # No newline at end of file
+    "W293",   # Blank line contains whitespace
+    "RUF005", # Consider list unpacking
+    "RUF012", # Mutable class attributes (Pydantic models need these)
+    "RUF013", # Implicit Optional
+    "SIM102", # Nested if statements
+    "SIM105", # contextlib.suppress
+    "SIM108", # Ternary operator
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["app"]

@@ -15,6 +15,7 @@ import asyncio
 import logging
 import os
 
+from adk_fleet_safety_multi_agent_system.helpers.env import load_env_and_verify_api_key
 from google.adk.agents import LlmAgent
 from google.adk.models.google_llm import Gemini
 from google.adk.plugins.logging_plugin import LoggingPlugin
@@ -22,8 +23,6 @@ from google.adk.runners import InMemoryRunner
 from google.adk.tools.agent_tool import AgentTool
 from google.adk.tools.google_search_tool import google_search
 from google.genai import types
-
-from adk_fleet_safety_multi_agent_system.helpers.env import load_env_and_verify_api_key
 
 # ============================================================================
 # Configuration

@@ -9,4 +9,4 @@ Kaggle notebooks, etc.).
 from app.helpers.env import load_env_and_verify_api_key, setup_api_key
 from app.helpers.weather import get_live_weather
 
-__all__ = ["load_env_and_verify_api_key", "setup_api_key", "get_live_weather"]
+__all__ = ["get_live_weather", "load_env_and_verify_api_key", "setup_api_key"]

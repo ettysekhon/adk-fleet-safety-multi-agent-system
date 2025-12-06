@@ -26,38 +26,39 @@ class RoutePlannerAgent(LlmAgent):
     def __init__(self, mcp_client):
         super().__init__(
             model="gemini-2.5-flash",
-            name="route_planner",
-            description="Intelligent route planning with multiple alternatives",
+            name="route_planner_agent",
+            description="Route planning specialist that generates multiple route options with fuel costs, distance, and duration for fleet vehicles. Call with origin, destination, and vehicle_type.",
             instruction="""You are a route planning specialist for commercial fleets.
 
-            Your workflow (SEQUENTIAL - follow this order):
-            1. Validate inputs (origin, destination, vehicle constraints)
-            2. Call Google Maps MCP to get 3-5 alternative routes
-            3. For each route:
-               a. Calculate fuel/energy cost based on distance and vehicle type
-               b. Check if delivery windows can be met
-               c. Identify required stops (rest breaks, fuel/charging)
-            4. Rank routes by multiple criteria
-            5. Return comprehensive comparison
+            When you receive a route planning request, you MUST:
+            1. Use the generate_route_options tool to get route alternatives from Google Maps
+            2. For each route returned, use calculate_fuel_cost to estimate costs
+            3. Return ALL routes with their details in a structured format
 
-            Vehicle Types & Considerations:
-            - Light truck: 4.0 miles/litre, £1.45/litre, 300-mile range
-            - Heavy truck: 2.0 miles/litre, £1.45/litre, 500-mile range
-            - Van: 5.5 miles/litre, £1.45/litre, 400-mile range
-            - Electric Truck: 1.5 miles/kWh, £0.45/kWh, 250-mile range
-            - Electric Van: 2.5 miles/kWh, £0.45/kWh, 180-mile range
+            IMPORTANT: Always call generate_route_options first with the origin and destination.
+            Then process the results to provide useful route information.
 
-            Constraints:
-            - Driver HOS: Max 11 hours driving, required 30-min break after 8 hours
-            - Fuel/Charge stops: When range < 50 miles remaining
-            - Rest breaks: Every 4-5 hours
+            Vehicle Types & Fuel Efficiency:
+            - light_truck: 4.0 miles/litre diesel, 300-mile range
+            - heavy_truck: 2.0 miles/litre diesel, 500-mile range
+            - van: 5.5 miles/litre diesel, 400-mile range
+            - electric_truck: 1.5 miles/kWh, 250-mile range
+            - electric_van: 2.5 miles/kWh, 180-mile range
 
-            Always explain your route selection reasoning.
+            Format your response as structured data including:
+            - Route summary/name
+            - Distance (miles)
+            - Duration (minutes)
+            - Duration in traffic (minutes)
+            - Fuel/energy cost estimate
+            - Route polyline (for safety scoring)
+
+            Always explain which routes you found and their key differences.
             """,
             tools=[
-                self.validate_route_request,
                 self.generate_route_options,
                 self.calculate_fuel_cost,
+                self.validate_route_request,
                 self.check_delivery_windows,
                 self.find_required_stops,
                 self.rank_routes,

@@ -1,10 +1,9 @@
 """
-Test script for FleetSafetyOrchestrator.
-Exercises coordination between Orchestrator and all specialist agents using a mock MCP client.
+Unit tests for FleetSafetyOrchestrator.
+Tests the orchestrator's tools and agent registration (not LLM behaviour).
 """
 
-import asyncio
-import json
+import pytest
 
 from app.agents.fleet_safety.analytics_agent import AnalyticsAgent
 from app.agents.fleet_safety.dynamic_rerouter_agent import DynamicRerouterAgent
@@ -14,112 +13,42 @@ from app.agents.fleet_safety.route_planner_agent import RoutePlannerAgent
 from app.agents.fleet_safety.safety_scorer_agent import SafetyScorerAgent
 
 
-# Mock MCP client for unit testing without real Google Maps calls
 class MockMCPClient:
+    """Mock MCP client for unit testing without real Google Maps calls."""
+
     async def call_tool(self, server_name, tool_name, arguments):
-        if tool_name == "geocode_address":
-            return json.dumps(
-                {
-                    "data": {
-                        "formatted_address": arguments["address"],
-                        "location": {"lat": 51.5, "lng": -0.1},
-                    }
-                }
-            )
-        elif tool_name == "get_directions":
-            return json.dumps(
-                {
-                    "data": {
-                        "routes": [
-                            {
-                                "summary": "M1 North",
-                                "distance_meters": 320000,
-                                "distance_miles": 198.8,
-                                "duration_seconds": 14400,
-                                "estimated_duration_minutes": 240,
-                                "polyline": "mock_polyline_1",
-                                "legs": [
-                                    {"distance": {"value": 320000}, "duration": {"value": 14400}}
-                                ],
-                            },
-                            {
-                                "summary": "A1(M)",
-                                "distance_meters": 330000,
-                                "distance_miles": 204.8,
-                                "duration_seconds": 15000,
-                                "estimated_duration_minutes": 250,
-                                "polyline": "mock_polyline_2",
-                                "legs": [
-                                    {"distance": {"value": 330000}, "duration": {"value": 15000}}
-                                ],
-                            },
-                        ]
-                    }
-                }
-            )
-        elif tool_name == "get_traffic_conditions":
-            return json.dumps({"traffic_level": "low"})
-        elif tool_name == "calculate_route_safety_factors":
-            return json.dumps(
-                {
-                    "safety_score": 75,
-                    "risk_factors": [
-                        {
-                            "factor": "moderate_speed",
-                            "impact": -5,
-                            "details": "Average speed 60 mph",
-                        }
-                    ],
-                }
-            )
-        elif tool_name == "find_nearby_places":
-            return json.dumps(
-                {
-                    "places": [
-                        {
-                            "name": "Mock Service Station",
-                            "place_id": "mock_place_123",
-                            "rating": 4.5,
-                        }
-                    ]
-                }
-            )
-        elif tool_name == "get_place_details":
-            return json.dumps(
-                {
-                    "data": {
-                        "name": "Mock Service Station",
-                        "rating": 4.5,
-                        "formatted_address": "M1 Services, UK",
-                    }
-                }
-            )
-        elif tool_name == "get_route_elevation_gain":
-            return json.dumps({"total_gain": 300})  # 300 meters elevation gain
         return "{}"
 
 
-def print_json(data):
-    print(json.dumps(data, indent=2, default=str))
-
-
-async def test_orchestrator():
-    print("Starting FleetSafetyOrchestrator test")
-    print("=" * 60)
-
-    mock_client = MockMCPClient()
-
-    # 1. Initialise all agents
-    print("\nInitialising agents...")
+@pytest.mark.asyncio
+async def test_orchestrator_init():
+    """Test orchestrator initializes correctly."""
     orchestrator = FleetSafetyOrchestrator()
 
+    assert orchestrator.name == "fleet_safety_orchestrator"
+    assert orchestrator.model == "gemini-2.5-flash"
+    assert "vehicles" in orchestrator.fleet_state
+    assert "drivers" in orchestrator.fleet_state
+    assert "active_trips" in orchestrator.fleet_state
+    assert "alerts" in orchestrator.fleet_state
+
+
+@pytest.mark.asyncio
+async def test_register_agents():
+    """Test that specialist agents can be registered."""
+    orchestrator = FleetSafetyOrchestrator()
+    mock_client = MockMCPClient()
+
+    # Create specialist agents
     route_planner = RoutePlannerAgent(mcp_client=mock_client)
     safety_scorer = SafetyScorerAgent(mcp_client=mock_client)
     risk_monitor = RiskMonitorAgent(mcp_client=mock_client)
     analytics = AnalyticsAgent(mcp_client=mock_client)
     rerouter = DynamicRerouterAgent(mcp_client=mock_client)
 
-    # 2. Register agents with orchestrator
+    initial_tool_count = len(orchestrator.tools)
+
+    # Register agents
     orchestrator.register_agents(
         {
             "route_planner": route_planner,
@@ -130,57 +59,149 @@ async def test_orchestrator():
         }
     )
 
-    # Mock fleet state in orchestrator
-    orchestrator.fleet_state["vehicles"]["vehicle_001"] = {
-        "id": "vehicle_001",
-        "type": "truck",
+    # Verify agents are stored
+    assert orchestrator.route_planner is route_planner
+    assert orchestrator.safety_scorer is safety_scorer
+    assert orchestrator.risk_monitor is risk_monitor
+    assert orchestrator.analytics is analytics
+    assert orchestrator.rerouter is rerouter
+
+    # Verify AgentTools were added (5 new tools)
+    assert len(orchestrator.tools) == initial_tool_count + 5
+
+
+@pytest.mark.asyncio
+async def test_get_fleet_status():
+    """Test fleet status retrieval."""
+    orchestrator = FleetSafetyOrchestrator()
+
+    # Add test data
+    orchestrator.fleet_state["vehicles"]["v001"] = {
+        "id": "v001",
+        "type": "Heavy Truck",
         "status": "active",
     }
-    orchestrator.fleet_state["drivers"]["driver_001"] = {"id": "driver_001", "name": "Test Driver"}
+    orchestrator.fleet_state["vehicles"]["v002"] = {
+        "id": "v002",
+        "type": "Van",
+        "status": "inactive",
+    }
 
-    print("Agents registered")
+    status = await orchestrator.get_fleet_status()
 
-    # 3. Test: request route plan (planner + scorer)
-    print("\nTest: Request route plan (London -> Manchester)")
-    plan_result = await orchestrator.request_route_plan(
-        origin="London, UK",
-        destination="Manchester, UK",
-        driver_id="driver_001",
-        vehicle_id="vehicle_001",
-        priority="safety",
+    assert status["fleet_size"] == 2
+    assert status["active_vehicles"] == 1
+    assert "timestamp" in status
+    assert "system_health" in status
+
+
+@pytest.mark.asyncio
+async def test_get_fleet_status_with_details():
+    """Test fleet status with detailed info."""
+    orchestrator = FleetSafetyOrchestrator()
+
+    orchestrator.fleet_state["vehicles"]["v001"] = {
+        "id": "v001",
+        "type": "Heavy Truck",
+        "status": "active",
+    }
+
+    status = await orchestrator.get_fleet_status(include_details=True)
+
+    assert "vehicles" in status
+    assert len(status["vehicles"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_get_vehicle_info():
+    """Test vehicle info retrieval."""
+    orchestrator = FleetSafetyOrchestrator()
+
+    orchestrator.fleet_state["vehicles"]["v001"] = {
+        "id": "v001",
+        "type": "Heavy Truck",
+        "status": "active",
+        "fuel_type": "diesel",
+    }
+
+    # Existing vehicle
+    info = await orchestrator.get_vehicle_info("v001")
+    assert info["id"] == "v001"
+    assert info["type"] == "Heavy Truck"
+
+    # Non-existent vehicle
+    info = await orchestrator.get_vehicle_info("v999")
+    assert "error" in info
+
+
+@pytest.mark.asyncio
+async def test_get_driver_info():
+    """Test driver info retrieval."""
+    orchestrator = FleetSafetyOrchestrator()
+
+    orchestrator.fleet_state["drivers"]["d001"] = {
+        "id": "d001",
+        "name": "John Smith",
+        "experience_years": 5,
+    }
+
+    # Existing driver
+    info = await orchestrator.get_driver_info("d001")
+    assert info["id"] == "d001"
+    assert info["name"] == "John Smith"
+
+    # Non-existent driver
+    info = await orchestrator.get_driver_info("d999")
+    assert "error" in info
+
+
+@pytest.mark.asyncio
+async def test_generate_executive_dashboard():
+    """Test executive dashboard generation."""
+    orchestrator = FleetSafetyOrchestrator()
+
+    # Add some test data
+    orchestrator.fleet_state["vehicles"]["v001"] = {"id": "v001", "status": "active"}
+    orchestrator.fleet_state["alerts"].append(
+        {"id": "a001", "status": "active", "priority": "high"}
     )
 
-    print(f"Status: {plan_result.get('status')}")
-    if plan_result.get("status") == "success":
-        rec = plan_result["recommended_route"]
-        print(f"Recommended: {rec.get('summary')}")
-        print(f"Safety Score: {rec.get('safety_analysis', {}).get('safety_score')}")
-        print(f"Reason: {plan_result.get('selection_criteria')}")
-    else:
-        print_json(plan_result)
-
-    # 4. Test: check vehicle safety (RiskMonitor + Analytics)
-    print("\nTest: Check vehicle safety")
-    safety_status = await orchestrator.check_vehicle_safety("vehicle_001")
-    print_json(safety_status)
-
-    if safety_status.get("safety_rating"):
-        print("Vehicle safety check completed")
-
-    # 5. Test: executive dashboard (aggregate view)
-    print("\nTest: Generate executive dashboard")
     dashboard = await orchestrator.generate_executive_dashboard()
 
-    print("Fleet Overview:")
-    print_json(dashboard.get("fleet_overview"))
-    print("Key Metrics:")
-    print_json(dashboard.get("key_metrics"))
-
-    if dashboard.get("generated_at"):
-        print("Dashboard generated")
-
-    print("\nFleetSafetyOrchestrator test complete")
+    assert "generated_at" in dashboard
+    assert "fleet_overview" in dashboard
+    assert "key_metrics" in dashboard
+    assert "recommendations" in dashboard
+    assert "system_health" in dashboard
 
 
-if __name__ == "__main__":
-    asyncio.run(test_orchestrator())
+@pytest.mark.asyncio
+async def test_coordinate_emergency_response():
+    """Test emergency response coordination."""
+    orchestrator = FleetSafetyOrchestrator()
+
+    # Add alert
+    orchestrator.fleet_state["alerts"].append(
+        {
+            "id": "alert_001",
+            "status": "active",
+            "priority": "critical",
+            "vehicle_id": "v001",
+            "description": "Test emergency",
+        }
+    )
+
+    # Test immediate stop response
+    response = await orchestrator.coordinate_emergency_response(
+        alert_id="alert_001", response_type="immediate_stop"
+    )
+
+    assert response["alert_id"] == "alert_001"
+    assert response["response_type"] == "immediate_stop"
+    assert len(response["actions_taken"]) > 0
+
+    # Test non-existent alert
+    response = await orchestrator.coordinate_emergency_response(
+        alert_id="fake_alert", response_type="immediate_stop"
+    )
+    assert "error" in response

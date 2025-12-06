@@ -26,7 +26,7 @@ from vertexai.agent_engines.templates.adk import AdkApp
 # Import the core agent definition from our app/agent.py
 from app.agent import app as adk_app
 from app.app_utils.telemetry import setup_telemetry
-from app.app_utils.typing import Feedback
+from app.app_utils.types import Feedback
 
 
 class AgentEngineApp(AdkApp):
@@ -39,22 +39,24 @@ class AgentEngineApp(AdkApp):
         """Initialize the agent engine app with logging and telemetry."""
         # Get project and location from environment
         project = os.environ.get("GOOGLE_CLOUD_PROJECT")
-        location = os.environ.get("GOOGLE_CLOUD_LOCATION") or os.environ.get("GOOGLE_CLOUD_REGION", "europe-west2")
-        
+        location = os.environ.get("GOOGLE_CLOUD_LOCATION") or os.environ.get(
+            "GOOGLE_CLOUD_REGION", "europe-west2"
+        )
+
         # Initialise Vertex AI with explicit project and location
         vertexai.init(project=project, location=location)
-        
+
         setup_telemetry()
         super().set_up()
         logging.basicConfig(level=logging.INFO)
-        
+
         try:
             logging_client = google_cloud_logging.Client()
             self.logger = logging_client.logger(__name__)
         except Exception:
             # Fallback if Google Cloud Logging is not available (local dev)
             self.logger = logging.getLogger(__name__)
-        
+
         logging.info(f"Agent Engine initialised - Project: {project}, Location: {location}")
 
     def register_feedback(self, feedback: dict[str, Any]) -> None:
@@ -84,4 +86,3 @@ agent_engine = AgentEngineApp(
     if logs_bucket_name
     else InMemoryArtifactService(),
 )
-

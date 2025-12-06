@@ -195,5 +195,11 @@ my_env.tfvars
 .env
 .requirements.txt
 
+# Deployment metadata (auto-generated, contains user-specific Agent Engine ID)
+deployment_metadata.json
+
 # A2A Inspector
 tools/a2a-inspector/
+
+# Other
+AGENT_HANDOFF.md

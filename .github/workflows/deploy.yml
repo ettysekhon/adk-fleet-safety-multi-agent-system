@@ -1,0 +1,102 @@
+name: Deploy to Agent Engine
+
+on:
+    push:
+        branches: [main]
+    workflow_dispatch:
+        inputs:
+            environment:
+                description: "Deployment environment"
+                required: false
+                default: "production"
+
+env:
+    GCP_REGION: europe-west2
+    AGENT_DISPLAY_NAME: fleet-safety-agent
+
+jobs:
+    test:
+        runs-on: ubuntu-latest
+        env:
+            GOOGLE_API_KEY: "placeholder-for-ci"
+            GOOGLE_MAPS_API_KEY: "placeholder-for-ci"
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@v5
+              with:
+                  version: "latest"
+
+            - name: Set up Python
+              run: uv python install 3.12
+
+            - name: Install dependencies
+              run: uv sync
+
+            - name: Run unit tests
+              run: uv run pytest tests/unit/ -v --tb=short
+
+    deploy:
+        needs: test
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            id-token: write
+        env:
+            # Dummy values for import-time env checks (Agent Engine uses service account auth)
+            GOOGLE_API_KEY: "placeholder-for-import"
+            GOOGLE_MAPS_API_KEY: "placeholder-for-import"
+
+        steps:
+            - uses: actions/checkout@v4
+
+            - name: Install uv
+              uses: astral-sh/setup-uv@v5
+              with:
+                  version: "latest"
+
+            - name: Set up Python
+              run: uv python install 3.12
+
+            - name: Install dependencies
+              run: uv sync
+
+            - name: Google Auth (Workload Identity Federation)
+              id: auth
+              uses: google-github-actions/auth@v2
+              with:
+                  token_format: access_token
+                  workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+                  service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+            - name: Set up Cloud SDK
+              uses: google-github-actions/setup-gcloud@v2
+              with:
+                  project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+            - name: Ensure staging bucket exists
+              run: |
+                  BUCKET="gs://${{ secrets.GCP_PROJECT_ID }}-agent-staging"
+                  gcloud storage buckets create $BUCKET \
+                    --project=${{ secrets.GCP_PROJECT_ID }} \
+                    --location=${{ env.GCP_REGION }} || true
+
+            - name: Deploy to Vertex AI Agent Engine
+              run: |
+                  uv run python -m app.app_utils.deploy \
+                    --project=${{ secrets.GCP_PROJECT_ID }} \
+                    --location=${{ env.GCP_REGION }} \
+                    --display-name="${{ env.AGENT_DISPLAY_NAME }}" \
+                    --description="Multi-agent fleet safety system with route planning, risk monitoring, and analytics" \
+                    --entrypoint-module=app.agent_engine_app \
+                    --entrypoint-object=agent_engine \
+                    --set-env-vars="MCP_SERVER_URL=${{ secrets.MCP_SERVER_URL }},GOOGLE_CLOUD_REGION=${{ env.GCP_REGION }}"
+
+            - name: Show deployment info
+              if: success()
+              run: |
+                  echo "Deployment complete!"
+                  echo ""
+                  echo "View in GCP Console:"
+                  echo "https://console.cloud.google.com/vertex-ai/agents?project=${{ secrets.GCP_PROJECT_ID }}"

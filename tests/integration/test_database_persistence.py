@@ -1,10 +1,10 @@
 import asyncio
 import os
-import sqlite3
 import tempfile
 
 from google.adk.sessions import DatabaseSessionService
 from google.adk.sessions.session import Event
+from sqlalchemy import text
 
 
 async def test_database_persistence():
@@ -25,7 +25,6 @@ async def test_database_persistence():
         print(f"Session created: {session.id}")
 
         print("Appending event...")
-
         event = Event(
             content={"role": "user", "parts": [{"text": "integration test message"}]},
             author="tester",
@@ -34,27 +33,26 @@ async def test_database_persistence():
         print("Event appended.")
 
         print("Verifying database content...")
-        conn = sqlite3.connect(db_path)
-        cursor = conn.cursor()
-
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
-        tables = cursor.fetchall()
-        print(f"Tables found: {tables}")
-
         found_message = False
-        for table_name in tables:
-            table = table_name[0]
-            print(f"--- Table: {table} ---")
-            cursor.execute(f"SELECT * FROM {table}")
-            rows = cursor.fetchall()
-            for row in rows:
-                print(row)
+        async with service.db_engine.connect() as conn:
+            # Manually trigger table creation if not already created
+            await service._ensure_tables_created()
 
-                if "integration test message" in str(row):
-                    found_message = True
-                    print(">>> FOUND MESSAGE IN DB! <<<")
+            # Use synchronous transaction to inspect tables
+            result = await conn.execute(text("SELECT name FROM sqlite_master WHERE type='table';"))
+            tables = result.fetchall()
+            print(f"Tables found: {tables}")
 
-        conn.close()
+            for table_name in tables:
+                table = table_name[0]
+                print(f"--- Table: {table} ---")
+                result = await conn.execute(text(f"SELECT * FROM {table}"))
+                rows = result.fetchall()
+                for row in rows:
+                    print(row)
+                    if "integration test message" in str(row):
+                        found_message = True
+                        print(">>> FOUND MESSAGE IN DB! <<<")
 
         if found_message:
             print("\nSUCCESS: Database write verified.")

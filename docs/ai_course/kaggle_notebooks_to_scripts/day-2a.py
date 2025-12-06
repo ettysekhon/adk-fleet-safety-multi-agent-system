@@ -12,14 +12,13 @@ Reference: https://www.kaggle.com/code/kaggle5daysofai/day-2a-agent-tools
 
 import asyncio
 
+from adk_fleet_safety_multi_agent_system.helpers.env import load_env_and_verify_api_key
 from google.adk.agents import LlmAgent
 from google.adk.code_executors import BuiltInCodeExecutor
 from google.adk.models.google_llm import Gemini
 from google.adk.runners import InMemoryRunner
 from google.adk.tools import AgentTool
 from google.genai import types
-
-from adk_fleet_safety_multi_agent_system.helpers.env import load_env_and_verify_api_key
 
 
 def configure_retry_options():
@@ -233,7 +232,7 @@ def create_enhanced_currency_agent(retry_config, calculation_agent):
    1. Get Transaction Fee: Use the get_fee_for_payment_method() tool to determine the transaction fee.
    2. Get Exchange Rate: Use the get_exchange_rate() tool to get the currency conversion rate.
    3. Error Check: After each tool call, you must check the "status" field in the response. If the status is "error", you must stop and clearly explain the issue to the user.
-   4. Calculate Final Amount (CRITICAL): You are strictly prohibited from performing any arithmetic calculations yourself. You must use the calculation_agent tool to generate Python code that calculates the final converted amount. This 
+   4. Calculate Final Amount (CRITICAL): You are strictly prohibited from performing any arithmetic calculations yourself. You must use the calculation_agent tool to generate Python code that calculates the final converted amount. This
       code will use the fee information from step 1 and the exchange rate from step 2.
    5. Provide Detailed Breakdown: In your summary, you must:
        * State the final converted amount.

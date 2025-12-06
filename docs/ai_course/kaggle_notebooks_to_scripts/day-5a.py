@@ -16,6 +16,7 @@ import logging
 import uuid
 import warnings
 
+from adk_fleet_safety_multi_agent_system.helpers.env import load_env_and_verify_api_key
 from google.adk.a2a.utils.agent_to_a2a import to_a2a
 from google.adk.agents import LlmAgent
 from google.adk.agents.remote_a2a_agent import (
@@ -27,8 +28,6 @@ from google.adk.models.google_llm import Gemini
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
-
-from adk_fleet_safety_multi_agent_system.helpers.env import load_env_and_verify_api_key
 
 # Suppress experimental warnings for cleaner output
 warnings.filterwarnings("ignore", message=".*EXPERIMENTAL.*")

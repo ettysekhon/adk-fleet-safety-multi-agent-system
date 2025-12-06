@@ -56,7 +56,9 @@ else:
     logger.warning("remote_agent_engine_id not found in deployment_metadata.json or file missing.")
     # Defaults to avoid import errors during test collection
     base_url = "https://us-central1-aiplatform.googleapis.com"
-    url_path = "/v1/projects/PLACEHOLDER/locations/us-central1/reasoningEngines/PLACEHOLDER:streamQuery"
+    url_path = (
+        "/v1/projects/PLACEHOLDER/locations/us-central1/reasoningEngines/PLACEHOLDER:streamQuery"
+    )
 
 
 class ChatStreamUser(HttpUser):
@@ -114,9 +116,7 @@ class ChatStreamUser(HttpUser):
                                 # Flag any non-2xx codes as errors
                                 if event_data["code"] >= 400:
                                     has_error = True
-                                    error_msg = event_data.get(
-                                        "message", "Unknown error"
-                                    )
+                                    error_msg = event_data.get("message", "Unknown error")
                                     response.failure(f"Error in response: {error_msg}")
                                     logger.error(
                                         "Received error response: code=%s, message=%s",

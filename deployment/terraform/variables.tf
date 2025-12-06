@@ -81,7 +81,7 @@ variable "cicd_roles" {
 variable "cicd_sa_deployment_required_roles" {
   description = "List of roles to assign to the CICD runner service account for the Staging and Prod projects."
   type        = list(string)
-  default = [    
+  default = [
     "roles/iam.serviceAccountUser",
     "roles/aiplatform.user",
     "roles/storage.admin"
@@ -110,5 +110,3 @@ variable "feedback_logs_filter" {
   description = "Log Sink filter for capturing feedback data. Captures logs where the `log_type` field is `feedback`."
   default     = "jsonPayload.log_type=\"feedback\" jsonPayload.service_name=\"my-awesome-agent\""
 }
-
-

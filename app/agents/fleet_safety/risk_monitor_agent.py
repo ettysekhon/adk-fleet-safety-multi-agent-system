@@ -20,9 +20,9 @@ class RiskMonitorAgent(LlmAgent):
     def __init__(self, mcp_client):
         super().__init__(
             model="gemini-2.5-flash",
-            name="risk_monitor",
-            description="Real-time fleet safety monitoring",
-            instruction="""Monitor vehicle telemetry and detect safety risks:
+            name="risk_monitor_agent",
+            description="Real-time fleet safety monitoring that detects speeding, harsh braking, fatigue, and other safety risks from vehicle telemetry data.",
+            instruction="""You are a real-time fleet safety monitor. When queried, analyze vehicle telemetry and detect safety risks:
 
             HIGH RISK (immediate intervention):
             - Harsh braking/acceleration (>0.4g)

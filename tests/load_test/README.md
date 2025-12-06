@@ -3,13 +3,14 @@
 
 This directory provides a comprehensive load testing framework for your Generative AI application, leveraging the power of [Locust](http://locust.io), a leading open-source load testing tool.
 
-##  Load Testing
+## Load Testing
 
 Before running load tests, ensure you have deployed the backend remotely.
 
 Follow these steps to execute load tests:
 
 **1. Deploy the Backend Remotely:**
+
    ```bash
    gcloud config set project <your-dev-project-id>
    make deploy
@@ -35,4 +36,3 @@ Follow these steps to execute load tests:
    ```
 
    This command initiates a 30-second load test, simulating 2 users spawning per second, reaching a maximum of 10 concurrent users.
-

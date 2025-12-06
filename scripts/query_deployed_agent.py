@@ -14,6 +14,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import sys
 
@@ -24,10 +25,27 @@ import vertexai
 from vertexai import agent_engines
 
 
-# Configuration - update these if needed
+def load_deployment_metadata() -> dict:
+    """Load deployment metadata from deployment_metadata.json if it exists."""
+    metadata_file = os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "deployment_metadata.json"
+    )
+    if os.path.exists(metadata_file):
+        with open(metadata_file) as f:
+            return json.load(f)
+    return {}
+
+
+# Load deployment metadata
+_metadata = load_deployment_metadata()
+
+# Configuration - reads from deployment_metadata.json or environment/defaults
 PROJECT_ID = os.environ.get("GOOGLE_CLOUD_PROJECT", "simple-gcp-data-pipeline")
 LOCATION = os.environ.get("GOOGLE_CLOUD_REGION", "europe-west2")
-AGENT_ENGINE_ID = "8524575222798483456"
+
+# Extract agent ID from metadata (format: projects/.../reasoningEngines/ID)
+_resource_name = _metadata.get("remote_agent_engine_id", "")
+AGENT_ENGINE_ID = _resource_name.split("/")[-1] if _resource_name else ""
 
 
 def get_agent():
@@ -45,37 +63,33 @@ def create_session(agent, user_id: str) -> str:
 def query_agent(agent, user_id: str, session_id: str, message: str) -> str:
     """Send a query to the agent and return the response."""
     response_text = ""
-    
+
     print("\nAgent Response:\n")
     print("-" * 60)
-    
-    for chunk in agent.stream_query(
-        user_id=user_id,
-        session_id=session_id,
-        message=message
-    ):
+
+    for chunk in agent.stream_query(user_id=user_id, session_id=session_id, message=message):
         # Agent Engine returns dict chunks with 'content' containing 'parts'
         if isinstance(chunk, dict):
-            content = chunk.get('content', {})
+            content = chunk.get("content", {})
             if isinstance(content, dict):
-                parts = content.get('parts', [])
+                parts = content.get("parts", [])
                 for part in parts:
-                    if isinstance(part, dict) and 'text' in part:
-                        text = part['text']
+                    if isinstance(part, dict) and "text" in part:
+                        text = part["text"]
                         print(text, end="", flush=True)
                         response_text += text
         elif isinstance(chunk, str):
             print(chunk, end="", flush=True)
             response_text += chunk
-        elif hasattr(chunk, 'content'):
+        elif hasattr(chunk, "content"):
             # Handle object-style responses
             content = chunk.content
-            if hasattr(content, 'parts'):
+            if hasattr(content, "parts"):
                 for part in content.parts:
-                    if hasattr(part, 'text') and part.text:
+                    if hasattr(part, "text") and part.text:
                         print(part.text, end="", flush=True)
                         response_text += part.text
-    
+
     print("\n" + "-" * 60)
     return response_text
 
@@ -95,28 +109,28 @@ Commands:
   'quit' or 'exit' - End the session
   'new'            - Start a new session
 """)
-    
+
     session_id = create_session(agent, user_id)
     print(f"Session created: {session_id[:20]}...\n")
-    
+
     while True:
         try:
             user_input = input("\nYou: ").strip()
-            
+
             if not user_input:
                 continue
-            
-            if user_input.lower() in ['quit', 'exit', 'q']:
+
+            if user_input.lower() in ["quit", "exit", "q"]:
                 print("\nSession ended.")
                 break
-            
-            if user_input.lower() == 'new':
+
+            if user_input.lower() == "new":
                 session_id = create_session(agent, user_id)
                 print(f"New session created: {session_id[:20]}...")
                 continue
-            
+
             query_agent(agent, user_id, session_id, user_input)
-            
+
         except KeyboardInterrupt:
             print("\n\nSession ended.")
             break
@@ -138,45 +152,39 @@ Examples:
 
   # Route planning query
   python scripts/query_deployed_agent.py -q "Plan a safe route from London to Manchester for vehicle v001"
-        """
+        """,
+    )
+    parser.add_argument("-q", "--query", help="Single query to send (omit for interactive mode)")
+    parser.add_argument(
+        "-u", "--user", default="cli_user", help="User ID for the session (default: cli_user)"
     )
     parser.add_argument(
-        "-q", "--query",
-        help="Single query to send (omit for interactive mode)"
+        "--project", default=PROJECT_ID, help=f"GCP Project ID (default: {PROJECT_ID})"
     )
+    parser.add_argument("--location", default=LOCATION, help=f"GCP Location (default: {LOCATION})")
     parser.add_argument(
-        "-u", "--user",
-        default="cli_user",
-        help="User ID for the session (default: cli_user)"
+        "--agent-id", default=AGENT_ENGINE_ID, help=f"Agent Engine ID (default: {AGENT_ENGINE_ID})"
     )
-    parser.add_argument(
-        "--project",
-        default=PROJECT_ID,
-        help=f"GCP Project ID (default: {PROJECT_ID})"
-    )
-    parser.add_argument(
-        "--location",
-        default=LOCATION,
-        help=f"GCP Location (default: {LOCATION})"
-    )
-    parser.add_argument(
-        "--agent-id",
-        default=AGENT_ENGINE_ID,
-        help=f"Agent Engine ID (default: {AGENT_ENGINE_ID})"
-    )
-    
+
     args = parser.parse_args()
-    
+
     # Use args values (they default to the module-level constants)
     project_id = args.project
     location = args.location
     agent_id = args.agent_id
-    
+
+    if not agent_id:
+        print("Error: No Agent Engine ID found.")
+        print("Either:")
+        print("  1. Run 'make deploy' first to create deployment_metadata.json")
+        print("  2. Pass --agent-id explicitly")
+        sys.exit(1)
+
     print("Connecting to deployed agent...")
     vertexai.init(project=project_id, location=location)
     agent = agent_engines.get(agent_id)
     print("Connected.\n")
-    
+
     if args.query:
         # Single query mode
         session_id = create_session(agent, args.user)

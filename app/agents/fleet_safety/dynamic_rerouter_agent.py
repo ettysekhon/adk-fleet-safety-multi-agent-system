@@ -41,8 +41,8 @@ class DynamicRerouterAgent(LlmAgent):
     def __init__(self, mcp_client):
         super().__init__(
             model="gemini-2.5-flash",
-            name="dynamic_rerouter",
-            description="Real-time route monitoring and adaptive rerouting",
+            name="rerouter_agent",
+            description="Dynamic rerouting specialist that monitors active trips for delays, incidents, and safety issues, then calculates and recommends alternative routes.",
             instruction="""You are a dynamic rerouting specialist for active trips.
 
             YOUR WORKFLOW:
@@ -124,13 +124,10 @@ class DynamicRerouterAgent(LlmAgent):
                     }
                 )
 
-                # Determine if reroute needed
                 if conditions.get("reroute_recommended", False):
-                    # Calculate benefit
                     benefit = await self.calculate_reroute_benefit(trip, conditions)
 
                     if benefit.get("should_reroute", False):
-                        # Execute reroute
                         reroute_result = await self.generate_alternative_route(
                             trip, conditions, benefit
                         )
@@ -139,7 +136,6 @@ class DynamicRerouterAgent(LlmAgent):
                             reroutes_triggered += 1
 
             except Exception as e:
-                # Log error but continue monitoring other trips
                 monitored_trips.append(
                     {
                         "trip_id": trip_id,
@@ -163,7 +159,6 @@ class DynamicRerouterAgent(LlmAgent):
         """
         vehicle_location = trip.get("current_location", trip["origin"])
         destination = trip["destination"]
-        # Ensure location is formatted correctly for API
         if isinstance(vehicle_location, dict) and "lat" in vehicle_location:
             origin_str = f"{vehicle_location['lat']},{vehicle_location['lng']}"
         else:
@@ -173,25 +168,21 @@ class DynamicRerouterAgent(LlmAgent):
             "remaining_route_polyline", trip.get("planned_route_polyline", "")
         )
 
-        # Get current traffic conditions
         try:
-            # Try with origin/destination as per 0.2.0 update ("delay estimates between locations")
             traffic_result = await self.mcp_client.call_tool(
                 "google_maps",
                 "get_traffic_conditions",
                 {"origin": origin_str, "destination": destination, "mode": "driving"},
             )
 
-            # Parse result
             if isinstance(traffic_result, str):
                 traffic_data = json.loads(traffic_result)
             elif hasattr(traffic_result, "content"):
                 traffic_data = json.loads(traffic_result.content[0].text)
             else:
-                traffic_data = traffic_result  # Assume dict
+                traffic_data = traffic_result
 
         except Exception:
-            # Fallback: try with path if tool supports it (older version?)
             try:
                 traffic_result = await self.mcp_client.call_tool(
                     "google_maps", "get_traffic_conditions", {"path": remaining_route}
@@ -201,10 +192,8 @@ class DynamicRerouterAgent(LlmAgent):
                 else:
                     traffic_data = traffic_result
             except Exception:
-                # Fallback: assume basic traffic check
                 traffic_data = {"traffic_level": "unknown"}
 
-        # Get fresh route to compare timing
         current_route = await self.mcp_client.call_tool(
             "google_maps",
             "get_directions",
@@ -218,7 +207,6 @@ class DynamicRerouterAgent(LlmAgent):
         try:
             current_route_data = json.loads(current_route)
             if isinstance(current_route_data, str):
-                # Handle potential double-encoding
                 current_route_data = json.loads(current_route_data)
         except Exception:
             return {"error": "Failed to parse route data", "reroute_recommended": False}
@@ -226,7 +214,6 @@ class DynamicRerouterAgent(LlmAgent):
         if not isinstance(current_route_data, dict):
             return {"error": "Invalid route data format (not a dict)", "reroute_recommended": False}
 
-        # Handle structure variation (data.routes vs routes)
         routes_list = []
         data_field = current_route_data.get("data")
         if isinstance(data_field, dict) and data_field.get("routes"):
@@ -243,10 +230,8 @@ class DynamicRerouterAgent(LlmAgent):
             if not isinstance(route, dict):
                 return {"error": "Invalid route format (not a dict)", "reroute_recommended": False}
 
-            # Extract duration
             dur = route.get("duration_in_traffic_minutes")
             if not dur:
-                # Try to parse/convert
                 dur_obj = route.get("duration_in_traffic")
                 dur_seconds = None
                 if isinstance(dur_obj, dict):
@@ -267,7 +252,6 @@ class DynamicRerouterAgent(LlmAgent):
 
         delay_minutes = current_eta_minutes - planned_eta_minutes
 
-        # Check for incidents
         incidents = []
         if traffic_data.get("traffic_level") == "heavy":
             incidents.append(
@@ -278,7 +262,6 @@ class DynamicRerouterAgent(LlmAgent):
                 }
             )
 
-        # Determine if reroute recommended
         reroute_recommended = False
         reasons = []
 
@@ -290,10 +273,7 @@ class DynamicRerouterAgent(LlmAgent):
             reroute_recommended = True
             reasons.append("Heavy traffic causing major delays")
 
-        # Simulated EV Range Check
-        # In a real system, we'd check telemetry for battery_level
         if trip.get("vehicle_type", "diesel") == "electric":
-            # Mock: 5% chance of low battery warning for demo purposes
             import random
 
             if random.random() < 0.05:
@@ -344,7 +324,6 @@ class DynamicRerouterAgent(LlmAgent):
             except Exception:
                 pass
 
-        # Normalize routes list
         routes_list = []
         if isinstance(alt_routes_data, dict):
             data_field = alt_routes_data.get("data")
@@ -356,17 +335,14 @@ class DynamicRerouterAgent(LlmAgent):
         if not routes_list or len(routes_list) < 2:
             return {"should_reroute": False, "reason": "No alternative routes available"}
 
-        # Current route (first result)
         current = routes_list[0]
 
-        # Extract numerical values helper
         def get_minutes(r):
             if not isinstance(r, dict):
                 return 0
             m = r.get("duration_in_traffic_minutes")
             if m is not None:
                 return m
-            # fallback
             dur_obj = r.get("duration_in_traffic")
             s = None
             if isinstance(dur_obj, dict):
@@ -398,7 +374,6 @@ class DynamicRerouterAgent(LlmAgent):
         current_time = get_minutes(current)
         current_distance = get_miles(current)
 
-        # Find best alternative
         alternatives = routes_list[1:]
         best_alt = None
         best_benefit = 0
@@ -407,20 +382,17 @@ class DynamicRerouterAgent(LlmAgent):
             alt_time = get_minutes(alt)
             alt_distance = get_miles(alt)
 
-            # Time savings
             time_savings = current_time - alt_time
 
-            # Distance penalty (if significantly longer)
             if current_distance > 0:
                 distance_increase_pct = (alt_distance - current_distance) / current_distance
             else:
                 distance_increase_pct = 0
 
             if distance_increase_pct > self.max_additional_distance_pct:
-                continue  # Too much extra distance
+                continue
 
-            # Calculate benefit score
-            benefit_score = time_savings - (distance_increase_pct * 30)  # Penalize extra distance
+            benefit_score = time_savings - (distance_increase_pct * 30)
 
             if benefit_score > best_benefit:
                 best_benefit = benefit_score
@@ -428,7 +400,6 @@ class DynamicRerouterAgent(LlmAgent):
                 best_alt["time_savings"] = time_savings
                 best_alt["distance_increase_pct"] = distance_increase_pct
 
-        # Decision
         should_reroute = False
         decision_reason = ""
 
@@ -436,7 +407,6 @@ class DynamicRerouterAgent(LlmAgent):
             should_reroute = True
             decision_reason = f"Alternative route saves {best_alt['time_savings']:.0f} minutes"
         elif conditions.get("incidents"):
-            # Critical incidents override time threshold
             critical_incidents = [
                 i for i in conditions["incidents"] if i.get("severity") in ["critical", "major"]
             ]
@@ -466,14 +436,12 @@ class DynamicRerouterAgent(LlmAgent):
 
         new_route = benefit["best_alternative"]
 
-        # Update trip with new route
         old_route = trip.get("current_route")
         trip["current_route"] = new_route
         trip["remaining_route_polyline"] = new_route.get("polyline") or new_route.get(
             "overview_polyline", {}
         ).get("points", "")
 
-        # Use helper to get duration
         def get_minutes(r):
             if not isinstance(r, dict):
                 return 0
@@ -496,10 +464,8 @@ class DynamicRerouterAgent(LlmAgent):
 
         trip["planned_remaining_duration_minutes"] = get_minutes(new_route)
 
-        # Notify driver
         notification = await self.notify_driver_reroute(trip, conditions, benefit)
 
-        # Log reroute
         reroute_record = {
             "trip_id": trip["trip_id"],
             "vehicle_id": trip["vehicle_id"],
@@ -556,7 +522,6 @@ Instructions: Follow updated navigation on your device.
         Execute emergency reroute (bypasses normal decision logic).
         Used for critical situations like road closures, accidents ahead, etc.
         """
-        # Find active trip for this vehicle
         trip = next(
             (t for t in self.active_trips.values() if t["vehicle_id"] == vehicle_id),
             None,
@@ -565,14 +530,6 @@ Instructions: Follow updated navigation on your device.
         if not trip:
             return {"success": False, "error": "No active trip found for vehicle"}
 
-        # Force reroute with highest priority
-        # conditions = {
-        #     "emergency": True,
-        #     "reason": reason,
-        #     "timestamp": datetime.now().isoformat(),
-        # }
-
-        # Get alternative route
         vehicle_location = trip["current_location"]
         if isinstance(vehicle_location, dict) and "lat" in vehicle_location:
             origin_str = f"{vehicle_location['lat']},{vehicle_location['lng']}"
@@ -599,23 +556,18 @@ Instructions: Follow updated navigation on your device.
             routes_list = alt_routes_data["routes"]
 
         if not routes_list or len(routes_list) < 2:
-            # Even in emergency, if no alternative exists, inform command center
             return {
                 "success": False,
                 "error": "No alternative routes available",
                 "recommendation": "Vehicle should stop and await instructions",
             }
 
-        # Take first alternative
         new_route = routes_list[1]
-
-        # Apply immediately
         trip["current_route"] = new_route
         trip["remaining_route_polyline"] = new_route.get("polyline") or new_route.get(
             "overview_polyline", {}
         ).get("points", "")
 
-        # Emergency notification
         emergency_notification = {
             "trip_id": trip["trip_id"],
             "vehicle_id": vehicle_id,
@@ -632,7 +584,6 @@ Contact dispatch if unable to comply.
             "timestamp": datetime.now().isoformat(),
         }
 
-        # Log emergency reroute
         self.reroute_history.append(
             {
                 "trip_id": trip["trip_id"],

@@ -27,5 +27,3 @@ resource "google_service_account" "app_sa" {
   project      = each.value
   depends_on   = [resource.google_project_service.cicd_services, resource.google_project_service.deploy_project_services]
 }
-
-

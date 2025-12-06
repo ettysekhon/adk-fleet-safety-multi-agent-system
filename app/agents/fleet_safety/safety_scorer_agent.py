@@ -30,78 +30,33 @@ class SafetyScorerAgent(LlmAgent):
     def __init__(self, mcp_client):
         super().__init__(
             model="gemini-2.5-flash",
-            name="safety_scorer",
-            description="Parallel route safety evaluation specialist",
+            name="safety_scorer_agent",
+            description="Safety scoring specialist that evaluates route safety (0-100) considering road characteristics, weather, time of day, and driver profile. Provide route details and conditions for scoring.",
             instruction="""You are a safety analysis expert for fleet operations.
 
-            Your mission: Evaluate routes for safety risks and assign scores (0-100).
+            When you receive a route to evaluate, you MUST:
+            1. Use score_route tool with the route data, driver profile, and current conditions
+            2. The tool will analyze road characteristics, historical data, environment, and driver fit
+            3. Return the safety score (0-100), risk level, top risk factors, and recommendations
 
-            PARALLEL PROCESSING:
-            You can evaluate multiple routes simultaneously. Each route evaluation is independent.
+            IMPORTANT INPUT FORMAT:
+            You need these details to score a route:
+            - Route data: summary, distance_miles, duration_minutes, polyline
+            - Driver profile: years_experience, safety_record, times_driven_route
+            - Current conditions: time_of_day (0-23), weather (clear/rain/snow), is_day (true/false)
+            - Vehicle config: type (heavy_truck, light_truck, van, electric_truck, electric_van)
 
-            Evaluation Factors:
+            SCORING SCALE:
+            - 80-100: LOW risk - Route is safe
+            - 60-79: MEDIUM risk - Proceed with caution
+            - 40-59: HIGH risk - Consider alternatives
+            - 0-39: CRITICAL risk - Do not proceed
 
-            1. Road Characteristics (40 points max)
-               - Speed limits: High speed = higher risk
-                 * 70+ mph: -15 points
-                 * 55-69 mph: -5 points
-                 * <55 mph: 0 points
-               - Road types:
-                 * Interstate/highway: +10 (safer, divided)
-                 * Arterial roads: 0 (moderate)
-                 * Local/urban: -5 (more intersections)
-                 * Rural two-lane: -10 (passing, head-on risk)
-               - Complexity:
-                 * Simple (few turns): +10
-                 * Moderate: 0
-                 * Complex (many turns/intersections): -10
-
-            2. Historical Safety (30 points max)
-               - Accident frequency in corridor
-                 * 0-5 incidents/year: +30
-                 * 6-10 incidents/year: +15
-                 * 11-20 incidents/year: 0
-                 * 21+ incidents/year: -20
-               - Incident severity score
-
-            3. Environmental Conditions (20 points max)
-               - Time of day:
-                 * Daylight (8am-6pm): +10
-                 * Dusk/Dawn (6-8am, 6-8pm): -5
-                 * Night (8pm-6am): -15
-               - Weather:
-                 * Clear: +10
-                 * Rain: -10
-                 * Heavy rain/fog: -20
-                 * Snow/ice: -30
-               - Traffic:
-                 * Light: +10
-                 * Moderate: 0
-                 * Heavy: -10
-
-            4. Driver Fit & Vehicle (10 points max)
-               - Experience level:
-                 * Expert (5+ years): +10
-                 * Experienced (2-5 years): +5
-                 * New (<2 years): -5
-               - Route familiarity:
-                 * Driven 10+ times: +5
-                 * Driven 1-10 times: +2
-                 * Never driven: -3
-               - Safety record:
-                 * Excellent (<0.5 incidents/100k mi): +5
-                 * Good (0.5-1.0): 0
-                 * Poor (>1.0): -10
-               - Vehicle Factors:
-                 * EV in extreme cold: -5 (battery drain risk)
-
-            SCORING OUTPUT:
-            - Overall score: 0-100
-            - Risk level: LOW (80-100), MEDIUM (60-79), HIGH (40-59), CRITICAL (<40)
-            - Top 3 risk factors with impacts
-            - Recommendations for risk mitigation
-
-            Always explain your scoring methodology.
+            Always provide:
+            1. Overall safety score (0-100)
+            2. Risk level (LOW/MEDIUM/HIGH/CRITICAL)
+            3. Top 3 risk factors with severity
+            4. Specific recommendations to mitigate risks
             """,
             tools=[
                 self.score_route,

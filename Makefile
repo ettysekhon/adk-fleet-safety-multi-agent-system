@@ -12,7 +12,7 @@ install:
 	uv sync
 
 playground:
-	uv run --python $(PYTHON_VERSION) adk web app/agents
+	MALLOC_ARENA_MAX=4 uv run --python $(PYTHON_VERSION) adk web app/agents
 
 run:
 	uv run --python $(PYTHON_VERSION) python -m app.agent
@@ -24,7 +24,7 @@ deploy:
 	@echo "Deploying to Agent Engine in project $(PROJECT_ID)..."
 	@echo "Ensuring staging bucket $(STAGING_BUCKET) exists..."
 	gcloud storage buckets create $(STAGING_BUCKET) --project=$(PROJECT_ID) --location=$(REGION) || true
-	
+
 	@echo "Running official Starter Pack deployment CLI..."
 	uv run --python $(PYTHON_VERSION) python -m app.app_utils.deploy \
 		--project=$(PROJECT_ID) \
@@ -40,7 +40,7 @@ register-gemini-enterprise:
 	# Add registration logic here
 
 test:
-	uv run --python $(PYTHON_VERSION) pytest tests/
+	uv run --python $(PYTHON_VERSION) pytest tests/ -v
 
 test-unit:
 	uv run --python $(PYTHON_VERSION) pytest tests/unit/ -v

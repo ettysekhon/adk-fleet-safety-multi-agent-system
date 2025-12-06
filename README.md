@@ -64,21 +64,22 @@ Agents can explain *why* a route was chosen (e.g., "Avoids high-speed section wi
 
 ### Overall Architecture
 
-I built a **6-agent coordinated system** where specialised AI agents work together to prevent fleet accidents.
+A **6-agent coordinated system** where specialised AI agents work together to prevent fleet accidents. The key architectural decision here is using ADK's `AgentTool` pattern—this means sub-agents appear as **nested invocations** in traces, so you can actually see the delegation happening.
 
 ```text
                  ┌─────────────────────────────┐
-                 │  Fleet Safety Orchestrator  │
-                 │  (Master Coordinator)       │
+                 │  fleet_safety_orchestrator  │
+                 │  (Central Coordinator)      │
+                 │  Uses AgentTool to delegate │
                  └──────────┬──────────────────┘
-                            │
+                            │ AgentTool calls
       ┌──────────┬──────────┼──────────┬──────────┐
       │          │          │          │          │
       ▼          ▼          ▼          ▼          ▼
  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐
- │ Route  │ │ Safety │ │Dynamic │ │ Risk   │ │Analy-  │
- │Planner │ │ Scorer │ │Reroute │ │ Monitor│ │ tics   │
- │ (Seq)  │ │ (Para) │ │ (Loop) │ │ (Loop) │ │(Batch) │
+ │ route_ │ │safety_ │ │rerouter│ │ risk_  │ │analy-  │
+ │planner_│ │scorer_ │ │_agent  │ │monitor_│ │ tics_  │
+ │ agent  │ │ agent  │ │        │ │ agent  │ │ agent  │
  └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘ └───┬────┘
      │          │          │          │          │
      └──────────┴──────────┴──────────┴──────────┘
@@ -86,59 +87,65 @@ I built a **6-agent coordinated system** where specialised AI agents work togeth
                         ▼
            ┌────────────────────────┐
            │ Google Maps MCP Server │
-           │  (9 Custom Tools)      │
+           │  (11 Tools)            │
            │                        │
-           │  • get_route_directions│
-           │  • calculate_safety    │
-           │  • find_nearby_places  │
-           │  • get_traffic_conds   │
+           │  • get_directions      │
+           │  • calculate_route_    │
+           │    safety_factors      │
+           │  • search_places       │
+           │  • get_traffic_        │
+           │    conditions          │
            │  • snap_to_roads       │
            │  • geocode_address     │
            │  • get_speed_limits    │
            │  • distance_matrix     │
            │  • get_place_details   │
+           │  • reverse_geocode     │
+           │  • get_route_          │
+           │    elevation_gain      │
            └────────────────────────┘
 ```
 
 ### The Agents
 
-#### 1. **Orchestrator Agent**
+Each agent is a proper `LlmAgent` with its own instruction and tools. When the orchestrator calls them via `AgentTool`, they run independently with their own LLM reasoning—you'll see this as nested invocations in the trace.
 
-- **Role**: Central coordinator
-- **Pattern**: Master agent with tool delegation
-- **Responsibilities**: Maintains fleet state, routes requests, makes final decisions.
+#### 1. **fleet_safety_orchestrator**
 
-#### 2. **Route Planner Agent**
+- **Role**: Central coordinator—decides which specialist agents to involve
+- **Pattern**: Master agent with `AgentTool` delegation
+- **What it does**: Maintains fleet state, routes requests to specialists, makes final decisions, aggregates results
+
+#### 2. **route_planner_agent**
 
 - **Role**: Generate optimal route alternatives
-- **Pattern**: Sequential workflow
-- **Steps**: Validate -> Generate -> Calculate Costs -> Check Constraints -> Rank
-- **Capabilities**: Supports Diesel and **Electric Vehicles (EVs)**, including charging station search and energy cost calculation.
+- **Pattern**: Sequential workflow (validate → generate → calculate costs → rank)
+- **Key capability**: Calls Google Maps MCP for real directions, handles both diesel and **EV** vehicles
 
-#### 3. **Safety Scorer Agent**
+#### 3. **safety_scorer_agent**
 
-- **Role**: Evaluate route safety factors
-- **Pattern**: Parallel processing
-- **Scoring**: Speed limits, traffic patterns, route complexity, historical data.
-- **EV Safety**: Accounts for range risks in cold weather conditions.
+- **Role**: Evaluate route safety (0-100 score)
+- **Pattern**: Parallel evaluation of multiple factors
+- **Scoring covers**: Speed limits, traffic patterns, route complexity, historical accident data, weather, driver experience
+- **EV-specific**: Accounts for range risks in cold weather
 
-#### 4. **Dynamic Rerouter Agent**
+#### 4. **rerouter_agent**
 
-- **Role**: Monitor active trips, reroute when needed
-- **Pattern**: Continuous loop
-- **Triggers**: Traffic delays > 15 min, road closures, weather hazards, **Critical Low Battery**.
+- **Role**: Monitor active trips, trigger rerouting when needed
+- **Pattern**: Event-driven (responds to incidents)
+- **Triggers**: Traffic delays >15 min, road closures, weather hazards, **EV critical low battery**
 
-#### 5. **Risk Monitor Agent**
+#### 5. **risk_monitor_agent**
 
-- **Role**: Continuous real-time telemetry monitoring
-- **Pattern**: Loop agent
-- **Capabilities**: Detects harsh braking, speeding, fatigue.
+- **Role**: Real-time telemetry monitoring
+- **Pattern**: Continuous monitoring
+- **Detects**: Harsh braking, speeding, driver fatigue patterns
 
-#### 6. **Analytics Agent**
+#### 6. **analytics_agent**
 
 - **Role**: Historical analysis and predictions
-- **Pattern**: Batch processing
-- **Capabilities**: Trend analysis, driver scoring, predictive risk modeling, **Energy Efficiency Tracking (kWh/mile)**.
+- **Pattern**: Batch processing for reporting
+- **Capabilities**: Trend analysis, driver scoring, predictive risk modelling, **energy efficiency tracking** (kWh/mile for EVs)
 
 ### Google Maps MCP Server
 
@@ -181,70 +188,101 @@ See the [full documentation](https://github.com/ettysekhon/google-maps-mcp-serve
 
 ### Key Technical Features
 
-- **Multi-agent system**: 6 agents, 4 patterns (Sequential, Parallel, Loop, Batch).
-- **EV & Hybrid Fleet Support**: Full support for electric vehicles, charging stops, and energy efficiency metrics.
-- **Real-time Weather Integration**: Live weather data from Open-Meteo API for safety scoring (rain, snow, wind conditions).
-- **Custom MCP server**: 11 tools, 7 APIs.
-- **Production-Ready Patterns**: Error handling, async/await, modular architecture.
+- **Proper multi-agent delegation**: Uses ADK's `AgentTool` pattern—sub-agents appear as nested invocations in traces
+- **6 specialist agents**: Each with distinct responsibilities and their own LLM reasoning
+- **EV & diesel fleet support**: Handles charging stops, range anxiety, energy costs
+- **Live weather integration**: Open-Meteo API data feeds into safety scoring
+- **Custom MCP server**: 11 tools across 7 Google Maps APIs
+- **Async throughout**: Proper `async/await` patterns for production use
 
 ---
 
 ## Showcase & Demo (ADK Web UI)
 
-To showcase **Observability** (Traces), **Session Management**, and **Memory**, use the ADK Web UI.
+The ADK Web UI is where you'll spend most of your time during development. It shows you exactly what's happening: which agents are being called, what they're thinking, and how long each step takes.
 
-**[Read the Showcase Guide](SHOWCASE_GUIDE.md)** for detailed instructions.
+**[Read the Showcase Guide](SHOWCASE_GUIDE.md)** for demo prompts and what to look for.
 
 ### Screenshots
 
 #### Agent Response with Safety Recommendations
 
-The orchestrator coordinates with Route Planner and Safety Scorer agents, returning prioritised safety recommendations:
+The orchestrator delegates to `route_planner_agent` and `risk_monitor_agent`, then aggregates their findings:
 
 ![ADK Response](docs/screenshots/1_screenshot_adk_responses.png)
 
-#### Trace View with Invocation Timeline
+#### Trace View with Nested Agent Invocations
 
-Visual breakdown of agent invocations, LLM calls, and tool executions with timing metrics:
+This is the key bit—you can see sub-agents appearing as **nested invocations**, not just function calls. Each agent runs its own LLM:
 
 ![ADK Trace](docs/screenshots/2_screenshot_adk_trace.png)
 
-#### Event Details with Function Calls
+#### Event Details with Tool Calls
 
-Detailed view of function calls showing parameters passed to tools like `request_route_plan`:
+Expand any step to see exactly what parameters were passed and what came back:
 
 ![ADK Event Details](docs/screenshots/3_screensjot_adk_trace_2.png)
 
-#### Request Inspection with System Instructions
+#### Request Inspection
 
-View the model configuration, system instructions, and available tools:
+Useful for debugging—see the system instructions and available tools the LLM sees:
 
 ![ADK Request](docs/screenshots/4_screenshot_adk_request.png)
 
 #### Agent Architecture Graph
 
-Visual representation of the orchestrator and its connected tools:
+Visual overview of the orchestrator and its tools (including the `AgentTool` wrappers for sub-agents):
 
 ![ADK Graph](docs/screenshots/5_screenshot_adk_graph.png)
 
+#### Cloud Deployment (Vertex AI Agent Engine)
+
+Production deployment to Agent Engine, with the MCP server running separately on GKE:
+
+![Cloud Deployment](docs/screenshots/6_screenshot_cloud_deployment.png)
+
 ## Quick Start
 
-### Prerequisites
+Get up and running in 5 minutes.
 
-1. **Python 3.12** and **uv** package manager
-2. **Google Cloud SDK** (`gcloud`) authenticated
-3. **API Keys** in `.env` file:
-
-   ```bash
-   GOOGLE_API_KEY=your-gemini-api-key
-   GOOGLE_MAPS_API_KEY=your-maps-api-key
-   ```
-
-### Installation
+### 1. Clone and Install
 
 ```bash
+git clone https://github.com/ettysekhon/adk-fleet-safety-multi-agent-system.git
+cd adk-fleet-safety-multi-agent-system
 make install
 ```
+
+### 2. Set Up Environment
+
+```bash
+cp .env_example .env
+# Edit .env with your API keys (see below)
+```
+
+### 3. Run Locally
+
+```bash
+make playground
+# Open http://localhost:8000
+```
+
+### Environment Variables
+
+| Key | Purpose | Required? |
+|-----|---------|-----------|
+| `GOOGLE_API_KEY` | Gemini LLM for agent reasoning | Yes (local dev) |
+| `MCP_SERVER_URL` | Remote MCP server URL | Recommended |
+| `GOOGLE_MAPS_API_KEY` | Local MCP server | Only if no `MCP_SERVER_URL` |
+
+**Minimal `.env` for quick start:**
+
+```bash
+GOOGLE_API_KEY=your-gemini-api-key
+MCP_SERVER_URL=http://XX.XX.X.XXX/sse
+```
+
+> **Tip**: Using `MCP_SERVER_URL` means you don't need your own Google Maps API key.
 
 ---
 
@@ -280,113 +318,357 @@ make run
 
 ## Deploying to Google Cloud
 
-### Deploy to Vertex AI Agent Engine
+See [DEPLOYMENT.md](DEPLOYMENT.md).
+
+### Step-by-Step Deployment Guide
+
+Follow these steps to deploy the Fleet Safety Agent to your own GCP project.
+
+#### Step 1: Prerequisites
+
+Ensure you have:
+
+- **Google Cloud account** with billing enabled
+- **gcloud CLI** installed ([install guide](https://cloud.google.com/sdk/docs/install))
+- **Python 3.12** and **uv** package manager
+
+#### Step 2: Authenticate with GCP
+
+```bash
+# Login to Google Cloud
+gcloud auth login
+
+# Set your project
+gcloud config set project YOUR_PROJECT_ID
+
+# Enable required APIs
+gcloud services enable aiplatform.googleapis.com storage.googleapis.com
+```
+
+#### Step 3: Set Up Environment Variables
+
+```bash
+# Copy the example file
+cp .env_example .env
+
+# Edit .env with your values
+```
+
+Your `.env` file should contain:
+
+```bash
+# Required for local development (Gemini LLM)
+GOOGLE_API_KEY=your-gemini-api-key
+
+# For MCP Server - choose ONE:
+# Option A: Use remote MCP server (recommended)
+MCP_SERVER_URL=http://XX.XX.X.XXX/sse
+
+# Option B: Use local MCP server (requires your own Maps API key)
+# GOOGLE_MAPS_API_KEY=your-maps-api-key
+```
+
+> **Note**: `GOOGLE_API_KEY` is automatically filtered out during deployment. Agent Engine uses service account authentication instead.
+
+#### Step 4: Install Dependencies
+
+```bash
+make install
+```
+
+#### Step 5: Deploy
 
 ```bash
 make deploy
 ```
 
-This deploys the agent to **Vertex AI Agent Engine** in your configured GCP project.
-
-#### What Gets Deployed
-
-- Agent code packaged and uploaded to GCS
-- Deployed to Agent Engine with auto-scaling (1-10 instances)
-- Environment variables from `.env` (API keys filtered appropriately)
-
-#### Post-Deployment
-
-After deployment, you'll receive:
-
-- **Console Playground URL**: Test the agent in GCP Console
-- **Agent Engine ID**: For programmatic access
-
-#### Query the Deployed Agent
+Or run the deploy script directly with custom options:
 
 ```bash
-# Single query
-uv run python scripts/query_deployed_agent.py --query "What is the fleet status?"
-
-# Interactive mode
-uv run python scripts/query_deployed_agent.py
+uv run python app/app_utils/deploy.py \
+  --display-name="fleet-safety-agent" \
+  --description="Fleet Safety Multi-Agent System" \
+  --env-file=.env
 ```
 
-### Deployment Limitations
+This will:
 
-> **MCP Server Note**: The Google Maps MCP Server uses `stdio` (subprocess) communication, which doesn't work in Agent Engine's containerized environment. Route planning features requires a remote MCP server deployed to Cloud Run (with SSE transport)
+1. Package your agent code
+2. Upload to a GCS staging bucket (auto-created)
+3. Deploy to Vertex AI Agent Engine
+4. Generate `deployment_metadata.json` with your Agent Engine ID
+
+**Expected output:**
+
+```text
+Deployment successful!
+Service Account: service-XXX@gcp-sa-aiplatform-re.iam.gserviceaccount.com
+
+Open Console Playground: https://console.cloud.google.com/vertex-ai/agents/...
+```
+
+#### Step 6: Test Your Deployment
+
+```bash
+# Interactive mode
+uv run python scripts/query_deployed_agent.py
+
+# Single query
+uv run python scripts/query_deployed_agent.py --query "What is the fleet status?"
+```
+
+### CI/CD with GitHub Actions
+
+The repo includes two workflows:
+
+| Workflow | Trigger | What it does |
+|----------|---------|--------------|
+| `ci.yml` | PR + push to main | Lint + unit tests |
+| `deploy.yml` | Push to main | Tests + deploy to Agent Engine |
+
+#### GitHub Secrets Required
+
+Add these to your repo settings (Settings → Secrets → Actions):
+
+| Secret | Description | Example |
+|--------|-------------|---------|
+| `GCP_PROJECT_ID` | Your GCP project ID | `my-project-123` |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | WIF provider path | `projects/123/locations/global/workloadIdentityPools/github-pool/providers/github-provider` |
+| `GCP_SERVICE_ACCOUNT` | Service account email | `github-actions-sa@my-project.iam.gserviceaccount.com` |
+| `MCP_SERVER_URL` | Remote MCP server endpoint | `http://XX.XX.X.XXX/sse` |
+
+#### Setting Up Workload Identity Federation
+
+If you don't have WIF configured, run these commands once:
+
+```bash
+# Variables
+PROJECT_ID=your-project-id
+PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
+POOL_NAME=github-pool
+PROVIDER_NAME=github-provider
+SA_NAME=github-actions-sa
+
+# Create workload identity pool
+gcloud iam workload-identity-pools create $POOL_NAME \
+  --location="global" \
+  --project=$PROJECT_ID
+
+# Create OIDC provider for GitHub
+gcloud iam workload-identity-pools providers create-oidc $PROVIDER_NAME \
+  --location="global" \
+  --workload-identity-pool=$POOL_NAME \
+  --issuer-uri="https://token.actions.githubusercontent.com" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository_owner=assertion.repository_owner" \
+  --attribute-condition="assertion.repository_owner == 'YOUR_GITHUB_USERNAME'" \
+  --project=$PROJECT_ID
+
+# Create service account
+gcloud iam service-accounts create $SA_NAME \
+  --display-name="GitHub Actions" \
+  --project=$PROJECT_ID
+
+# Grant required roles
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:$SA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/aiplatform.admin"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:$SA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/storage.admin"
+
+# Allow GitHub to impersonate the service account
+gcloud iam service-accounts add-iam-policy-binding \
+  $SA_NAME@$PROJECT_ID.iam.gserviceaccount.com \
+  --role="roles/iam.workloadIdentityUser" \
+  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/$POOL_NAME/attribute.repository_owner/YOUR_GITHUB_USERNAME" \
+  --project=$PROJECT_ID
+
+# Print the provider path (use this for GCP_WORKLOAD_IDENTITY_PROVIDER secret)
+echo "projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/$POOL_NAME/providers/$PROVIDER_NAME"
+```
+
+Replace `YOUR_GITHUB_USERNAME` with your GitHub username or org (e.g., `ettysekhon`).
+
+### What Gets Deployed
+
+| Component | Description |
+|-----------|-------------|
+| Agent code | Packaged and uploaded to GCS |
+| Environment vars | From `.env` (excluding `GOOGLE_API_KEY`) |
+| Auto-scaling | 1-10 instances |
+| Resources | 4 CPU, 8Gi memory per instance |
+
+### Files Generated
+
+| File | Purpose |
+|------|---------|
+| `deployment_metadata.json` | Contains your Agent Engine ID (auto-generated, gitignored) |
+
+### Troubleshooting Deployment
+
+**"Permission denied" errors:**
+
+```bash
+# Ensure you're authenticated
+gcloud auth login
+gcloud auth application-default login
+```
+
+**"API not enabled" errors:**
+
+```bash
+gcloud services enable aiplatform.googleapis.com storage.googleapis.com
+```
+
+**Deployment takes too long (>10 mins):**
+
+- First deployment can take 5-10 minutes
+- Check Cloud Build logs in GCP Console
+
+### MCP Server Architecture
+
+Locally, the agent spawns the MCP server as a subprocess (stdio). In production, Agent Engine blocks subprocess spawning, so the MCP server is deployed separately to GKE with SSE transport:
+
+```text
+┌─────────────────────────────────────────────────────────────────────┐
+│  Vertex AI Agent Engine                                             │
+│  ┌─────────────────────┐                                            │
+│  │  ADK Agent          │                                            │
+│  └─────────────────────┘                                            │
+└───────────│─────────────────────────────────────────────────────────┘
+            │ HTTP/SSE
+            ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  GKE (Google Kubernetes Engine)                                     │
+│  ┌─────────────────────┐                                            │
+│  │  MCP Server         │  ← http://<your-gke-ip>/sse                │
+│  │  (SSE Transport)    │                                            │
+│  └─────────────────────┘                                            │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+#### Option 1: GKE Deployment (Recommended)
+
+The MCP server is deployed to GKE and accessible via SSE:
+
+```bash
+# Set the remote MCP server URL
+export MCP_SERVER_URL=http://XX.XX.X.XXX/sse
+
+# Test the connection
+curl http://XX.XX.X.XXX/health
+# Expected: {"status":"healthy","version":"0.2.1","service":"google-maps-mcp-server"}
+
+# Run locally with remote MCP
+make playground
+```
+
+#### Option 2: Cloud Run Deployment
+
+```bash
+gcloud run deploy google-maps-mcp-server \
+    --source . \
+    --set-env-vars="GOOGLE_MAPS_API_KEY=your-key" \
+    --allow-unauthenticated
+```
+
+**Environment Variables:**
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `MCP_SERVER_URL` | Remote MCP server SSE endpoint (e.g., `http://XX.XX.X.XXX/sse`) | For production |
+| `GOOGLE_MAPS_API_KEY` | Google Maps API key | For local stdio only |
+
+When `MCP_SERVER_URL` is set, the agent connects via SSE. Otherwise, it falls back to local subprocess (stdio) for development
 
 ---
 
 ## Project Structure
 
+Here's how the codebase is organised. The key files to understand first are highlighted:
+
 ```bash
-├── app/                          # Main application code
-│   ├── agent.py                  # Agent definition & MCP client
-│   ├── agent_engine_app.py       # Production wrapper for Agent Engine
-│   ├── agents/fleet_safety/      # Agent implementations
-│   │   ├── orchestrator.py       # Central coordinator
+├── app/
+│   ├── agents/fleet_safety/      # START HERE - the actual agents
+│   │   ├── agent.py              # Entry point - creates & wires up all agents
+│   │   ├── orchestrator.py       # Central coordinator with AgentTool wrappers
 │   │   ├── route_planner_agent.py
 │   │   ├── safety_scorer_agent.py
 │   │   ├── dynamic_rerouter_agent.py
 │   │   ├── risk_monitor_agent.py
 │   │   ├── analytics_agent.py
 │   │   └── evaluation/           # ADK evaluation configs
+│   ├── agent.py                  # Legacy entry point (use agents/fleet_safety/ instead)
+│   ├── agent_engine_app.py       # Production wrapper for Vertex AI deployment
 │   ├── app_utils/                # Deployment & telemetry utilities
-│   └── helpers/                  # Environment & weather utilities
+│   │   ├── deploy.py             # Agent Engine deployment script
+│   │   └── telemetry.py          # OpenTelemetry setup
+│   └── helpers/
+│       ├── env.py                # Environment variable loading
+│       └── weather.py            # Open-Meteo weather integration
 ├── scripts/
-│   └── query_deployed_agent.py   # CLI for querying deployed agent
+│   └── query_deployed_agent.py   # CLI for testing deployed agents
 ├── tests/
-│   ├── unit/                     # Unit tests
-│   ├── integration/              # Integration tests
-│   └── load_test/                # Load testing with Locust
-├── notebooks/                    # Jupyter notebooks for testing
-├── deployment/                   # Terraform & deployment configs
-├── Makefile                      # Common commands
-├── pyproject.toml                # Dependencies
-└── deployment_metadata.json      # Deployed agent info (auto-updated)
+│   ├── unit/                     # No API keys needed - uses mocks
+│   ├── integration/              # Needs MCP server running
+│   └── load_test/                # Locust load testing
+├── docs/
+│   ├── screenshots/              # UI screenshots
+│   └── ai_course/                # Kaggle course materials
+├── Makefile                      # Common commands - run `make help`
+├── SHOWCASE_GUIDE.md             # Demo prompts and what to look for
+├── DEPLOYMENT.md                 # Agent Engine vs GKE - architecture deep dive
+└── deployment_metadata.json      # Auto-generated after deployment (gitignored)
 ```
+
+**Where to start:**
+
+1. Read `app/agents/fleet_safety/agent.py` — see how agents are created and wired together
+2. Read `orchestrator.py` — see the `AgentTool` pattern in `register_agents()`
+3. Run `make playground` and try the prompts from `SHOWCASE_GUIDE.md`
 
 ### Scenario 1: Intelligent Route Planning (Diesel)
 
 **Setup**: Route HGV from London to Manchester.
 
-**What Happens**:
+**What you'll see in the trace**:
 
-1. Orchestrator delegates to Route Planner.
-2. Route Planner generates alternatives (Diesel fuel calculation).
-3. Safety Scorer evaluates routes in parallel.
-4. Orchestrator recommends the safest option.
+1. `fleet_safety_orchestrator` receives the request
+2. Nested `route_planner_agent` invocation—generates route alternatives
+3. Nested `safety_scorer_agent` invocation—evaluates each route
+4. Orchestrator aggregates and recommends the safest option
 
 ### Scenario 2: Electric Vehicle Routing
 
-**Setup**: Electric Van from Cambridge to Edinburgh.
+**Setup**: Electric Van from Cambridge to Edinburgh (180-mile range vs 300-mile trip).
 
-**What Happens**:
+**What's different for EVs**:
 
-1. Route Planner identifies range constraints (~180 mile range vs ~300 mile trip).
-2. **Automatically adds charging stops** at optimal midpoints.
-3. Calculates **Charging Time** (45 mins fast charge) and **Energy Cost** (£0.45/kWh).
-4. Safety Scorer checks for cold weather risks affecting battery range.
+1. `route_planner_agent` identifies range constraints
+2. **Automatically adds charging stops** at optimal midpoints
+3. Calculates **charging time** (45 mins fast charge) and **energy cost** (£0.45/kWh)
+4. `safety_scorer_agent` flags cold weather risks affecting battery range
 
 ### Scenario 3: Real-Time Rerouting
 
 **Setup**: Traffic incident on M25.
 
-**What Happens**:
+**What you'll see**:
 
-1. Dynamic Rerouter detects >15 min delay.
-2. Calculates alternative.
-3. Notifies driver if safety/time tradeoff is positive.
+1. `rerouter_agent` detects >15 min delay
+2. May chain to `route_planner_agent` for alternatives
+3. Evaluates safety/time tradeoff before recommending
 
 ### Scenario 4: Executive Dashboard
 
 **Setup**: End-of-day review.
 
-**What Happens**:
+**What you'll see**:
 
-1. Orchestrator requests analytics.
-2. Analytics Agent aggregates data including **Energy Efficiency** and **CO2 Savings**.
-3. Dashboard generated with key metrics and recommendations.
+1. Orchestrator's `generate_executive_dashboard` tool called
+2. `analytics_agent` invocation for historical data
+3. Dashboard includes **energy efficiency** metrics for EVs
 
 ---
 
@@ -394,123 +676,147 @@ uv run python scripts/query_deployed_agent.py
 
 ### Technology Stack
 
-- **Core**: Google ADK, Gemini 2.5 Flash, Python 3.11+, asyncio
+- **Core**: Google ADK, Gemini 2.5 Flash, Python 3.12, asyncio
 - **APIs**: Google Maps Platform (7 APIs via MCP)
-- **Tools**: MCP Protocol, polyline, uv
+- **Tools**: MCP Protocol, polyline, uv package manager
 
-### Key Decisions
+### Key Architectural Decisions
 
-#### 1. Custom MCP Server
+These are worth understanding if you're building something similar:
 
-**Chose**: Custom MCP server over direct API calls.
-**Why**: Abstraction simplifies agent code and enables compound tools like `calculate_route_safety_factors`.
+#### 1. Custom MCP Server (vs Direct API Calls)
 
-#### 2. Agent Specialisation
+We built a custom MCP server rather than having agents call Google Maps APIs directly.
 
-**Chose**: 6 specialised agents.
-**Why**: Separation of concerns allows parallel execution (e.g., scoring multiple routes at once).
+**Why this matters**: The MCP server provides a clean abstraction. Agents just call tools like `get_directions`—they don't need to know about API authentication, rate limiting, or response parsing. It also lets us create compound tools like `calculate_route_safety_factors` that orchestrate multiple API calls.
 
-#### 3. Orchestrator Pattern
+#### 2. `AgentTool` Pattern (vs Direct Method Calls)
 
-**Chose**: Central Orchestrator.
-**Why**: Fleet operations need a single decision point for conflict resolution (Safety vs Speed).
+Sub-agents are wrapped in `AgentTool` rather than called as Python methods.
+
+**Why this matters**: With `AgentTool`, each sub-agent runs its own LLM and appears as a nested invocation in traces. Without it, you'd just see a function call—no visibility into what the sub-agent was "thinking". This is crucial for debugging and understanding agent behaviour.
+
+#### 3. Single Orchestrator (vs Peer-to-Peer)
+
+One central orchestrator coordinates all specialists, rather than agents talking directly to each other.
+
+**Why this matters**: Fleet operations often have conflicting priorities (safety vs speed vs cost). A central orchestrator can make those tradeoffs explicitly. It also makes the system easier to reason about—there's one place where the "final decision" happens.
 
 ---
 
 ## Future Enhancements
 
-### Immediate
+### Immediate (PRs Welcome)
 
-1. **Production Database**: Replace synthetic data with real fleet DB.
-2. **Evaluation Framework**: Metrics for route quality and safety prediction.
-3. **Driver App**: Native mobile interface for real-time updates.
+1. **Production database**: Replace synthetic data with real fleet DB (PostgreSQL/BigQuery)
+2. **More eval scenarios**: The current eval suite is basic—add edge cases
+3. **Better error handling**: Some MCP failures could be handled more gracefully
 
 ### Medium-Term
 
-1. **Personalisation**: Routing based on driver safety records.
-2. **Predictive Maintenance**: Routing based on vehicle health.
+1. **Driver personalisation**: Route preferences based on individual safety records
+2. **Predictive maintenance integration**: Factor vehicle health into routing decisions
 
 ### Long-Term
 
-1. **Computer Vision**: Dashcam agent for real-time hazard detection.
-2. **ML Enhancement**: Incident prediction models trained on fleet data.
-3. **Autonomous Prep**: V2V communication and platoon coordination.
+1. **Computer vision**: Dashcam agent for real-time hazard detection
+2. **ML models**: Train incident prediction on actual fleet data
+3. **V2V communication**: Vehicle-to-vehicle coordination for platooning
 
 ---
 
 ## Troubleshooting
 
-### Updating Dependencies
+### "Tool 'calculate_route_safety_factors' not listed"
 
-If you see `Tool 'calculate_route_safety_factors' not listed`, update the MCP server:
+The MCP server package is out of date. Update it:
 
 ```bash
 uv lock --upgrade-package google-maps-mcp-server
 uv sync
 ```
 
+### "Only one agent invoked"
+
+The LLM decides which agents to call. Be explicit in your prompt:
+
+- ❌ "Plan a route from A to B"
+- ✅ "Plan a route from A to B and **evaluate the safety** of each option"
+
+### "Sub-agent not showing as nested invocation"
+
+Check `orchestrator.py` uses `AgentTool`:
+
+```python
+AgentTool(agent=self.route_planner, skip_summarization=True)
+```
+
+If it's calling methods directly (e.g., `await self.route_planner.generate_route_options(...)`), you won't see nested invocations.
+
+### "MCP connection failed"
+
+Either set `MCP_SERVER_URL` for remote, or set `GOOGLE_MAPS_API_KEY` for local. The agent tries remote first, then falls back to local.
+
 ---
 
 ## Testing & Evaluation
 
-I have implemented a comprehensive testing strategy that covers both the **Code Layer** (Integration Tests) and the **Cognition Layer** (Agent Evaluations).
+Two layers of testing here: **Code Layer** (does the code work?) and **Cognition Layer** (does the agent make sensible decisions?).
 
-### 1. Automated Suite
+### Quick Reference
 
-Run the full suite with a single command. This checks system health (Database, MCP connectivity) and Agent reasoning quality.
+| Command | What it tests | Needs API keys? |
+|---------|---------------|-----------------|
+| `make test-unit` | Agent logic with mocks | No |
+| `make test-integration` | Real MCP server calls | Yes (Maps) |
+| `make eval` | Agent reasoning quality | Yes (Gemini) |
+| `./run_evals.sh` | Everything | Yes (both) |
+
+### 1. Unit Tests (Start Here)
+
+These use **mock MCP clients**—no API keys, no network. Perfect for CI/CD and quick feedback during development.
 
 ```bash
-./run_evals.sh
+make test-unit
+
+# Or run specific tests
+uv run pytest tests/unit/test_route_planner.py -v
+uv run pytest tests/unit/test_safety_scorer.py -v
 ```
 
-### 2. Integration Tests (Code Layer)
+### 2. Integration Tests
 
-Verifies that the system components (Database, MCP Server) are working correctly.
+These hit the **real Google Maps MCP server**. You'll need either:
+
+- `MCP_SERVER_URL` set (connects to remote server), or
+- `GOOGLE_MAPS_API_KEY` set (spawns local MCP subprocess)
 
 ```bash
-uv run pytest tests/integration/test_database_persistence.py
+# Remote MCP (recommended - no local setup needed)
+export MCP_SERVER_URL=http://XX.XX.X.XXX/sse
+make test-integration
 
-uv run pytest tests/integration/test_mcp_tools.py
+# Or local MCP
+export GOOGLE_MAPS_API_KEY=your-maps-api-key
+make test-integration
 ```
 
-### 3. ADK Evaluations (Cognition Layer)
+### 3. ADK Evaluations (Agent Reasoning)
 
-Verifies that the Agent is making the right decisions (e.g., prioritising safety when asked).
+This is the interesting bit—it tests whether the agent makes **sensible decisions**, not just whether the code runs. ADK sends test prompts and scores the responses.
 
 ```bash
 make eval
 ```
 
-Or manually:
+The eval config lives in `app/agents/fleet_safety/evaluation/`. Have a look at the `.evalset.json` files to see what scenarios are tested.
+
+### 4. Full Suite
+
+Run everything in one go:
 
 ```bash
-uv run adk eval \
-    app/agents/fleet_safety \
-    app/agents/fleet_safety/evaluation/comprehensive.evalset.json \
-    --config_file_path=app/agents/fleet_safety/evaluation/comprehensive_config.json \
-    --print_detailed_results
-```
-
-### 4. Running Tests Individually
-
-You can still run the individual python test scripts if needed:
-
-```bash
-uv run python tests/unit/test_route_planner.py
-uv run python tests/unit/test_safety_scorer.py
-uv run python tests/unit/test_analytics.py
-uv run python tests/unit/test_risk_monitor.py
-uv run python tests/unit/test_orchestrator.py
-```
-
-```bash
-# Full System
-uv run python tests/integration/test_orchestrator.py
-
-# Components
-uv run python tests/integration/test_route_planner.py
-uv run python tests/integration/test_safety_scorer.py
-uv run python tests/integration/test_dynamic_rerouter.py
+./run_evals.sh
 ```
 
 ---

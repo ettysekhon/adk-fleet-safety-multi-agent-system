@@ -14,7 +14,6 @@
 
 from .deploy import deploy_agent_engine_app
 from .telemetry import setup_telemetry
-from .typing import Feedback
+from .types import Feedback
 
-__all__ = ["deploy_agent_engine_app", "setup_telemetry", "Feedback"]
-
+__all__ = ["Feedback", "deploy_agent_engine_app", "setup_telemetry"]

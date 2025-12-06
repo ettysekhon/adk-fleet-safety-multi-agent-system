@@ -13,13 +13,12 @@ Reference: https://www.kaggle.com/code/kaggle5daysofai/day-1b-agent-architecture
 
 import asyncio
 
+from adk_fleet_safety_multi_agent_system.helpers.env import load_env_and_verify_api_key
 from google.adk.agents import Agent, LoopAgent, ParallelAgent, SequentialAgent
 from google.adk.models.google_llm import Gemini
 from google.adk.runners import InMemoryRunner
 from google.adk.tools import AgentTool, FunctionTool, google_search
 from google.genai import types
-
-from adk_fleet_safety_multi_agent_system.helpers.env import load_env_and_verify_api_key
 
 # ============================================================================
 # Configuration
