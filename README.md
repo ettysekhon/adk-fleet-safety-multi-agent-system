@@ -2,31 +2,19 @@
 
 ## Problem Statement
 
-Commercial fleet operators lose **£40-55k per accident**, yet current systems are purely reactive. The problem has three critical dimensions:
+If we ever expect autonomous fleets to be safe, our routing systems need to evolve. This project is my attempt at that problem.
 
-### 1. The Safety Crisis
+A single incident can cost fleets **tens of thousands** once you factor in downtime and indirect costs, yet most routing tools still optimise for ETA and ignore:
 
-- Thousands of HGV fatalities annually
-- Significant injuries from commercial vehicle accidents
-- Existing route optimisers prioritise speed over safety
+- **Accident density** — historical hotspots and collision patterns
+- **Speed-limit volatility** — variable limits, school zones, construction
+- **Fatigue signals** — driver hours, break compliance, alertness patterns
+- **Live incidents** — real-time traffic events and hazards
+- **EV range behaviour** — battery degradation, cold weather impact, charging availability
 
-### 2. The Operational Burden
+The problem is multidimensional. Traditional routing optimises a single objective (fastest route). Fleet safety requires reasoning across multiple dimensions simultaneously—and adapting as conditions change.
 
-- Fleet managers spend **10+ hours per week** manually planning routes
-- Route decisions ignore:
-  - Speed limit variations
-  - Historical accident data
-  - Driver fatigue patterns
-  - Real-time hazards
-
-### 3. The Cost Impact
-
-- Average accident: £40-55k
-- Insurance premiums spike 15-25% after incidents
-- Regulatory violations from Hours of Service (HOS) non-compliance
-
-**Why This Matters:**
-It can save lives not just money.
+**Why This Matters:** It can save lives, not just money.
 
 ---
 
@@ -599,11 +587,13 @@ Here's how the codebase is organised. The key files to understand first are high
 │   │   ├── risk_monitor_agent.py
 │   │   ├── analytics_agent.py
 │   │   └── evaluation/           # ADK evaluation configs
-│   ├── agent.py                  # Legacy entry point (use agents/fleet_safety/ instead)
+│   ├── agent.py                  # Root entry point (imports from agents/fleet_safety/)
 │   ├── agent_engine_app.py       # Production wrapper for Vertex AI deployment
-│   ├── app_utils/                # Deployment & telemetry utilities
+│   ├── app_utils/
 │   │   ├── deploy.py             # Agent Engine deployment script
-│   │   └── telemetry.py          # OpenTelemetry setup
+│   │   ├── requirements-deploy.txt  # Production dependencies
+│   │   ├── telemetry.py          # OpenTelemetry setup
+│   │   └── types.py              # Pydantic models
 │   └── helpers/
 │       ├── env.py                # Environment variable loading
 │       └── weather.py            # Open-Meteo weather integration
@@ -616,6 +606,9 @@ Here's how the codebase is organised. The key files to understand first are high
 ├── docs/
 │   ├── screenshots/              # UI screenshots
 │   └── ai_course/                # Kaggle course materials
+├── .github/workflows/
+│   ├── ci.yml                    # Lint + unit tests on PR
+│   └── deploy.yml                # Deploy to Agent Engine on push to main
 ├── Makefile                      # Common commands - run `make help`
 ├── SHOWCASE_GUIDE.md             # Demo prompts and what to look for
 ├── DEPLOYMENT.md                 # Agent Engine vs GKE - architecture deep dive
@@ -625,7 +618,7 @@ Here's how the codebase is organised. The key files to understand first are high
 **Where to start:**
 
 1. Read `app/agents/fleet_safety/agent.py` — see how agents are created and wired together
-2. Read `orchestrator.py` — see the `AgentTool` pattern in `register_agents()`
+2. Read `orchestrator.py` — see how `AgentTool` wraps specialist agents
 3. Run `make playground` and try the prompts from `SHOWCASE_GUIDE.md`
 
 ### Scenario 1: Intelligent Route Planning (Diesel)

@@ -1,11 +1,11 @@
 # Deployment Guide
 
-This document covers the deployment architecture for the Fleet Safety system. Two distinct deployment targets are involved:
+This document covers the deployment architecture for the Fleet Safety system and the lessons learned from getting it production-ready.
+
+Two distinct deployment targets are involved:
 
 1. **Vertex AI Agent Engine** — the multi-agent system itself
 2. **GKE** — the Google Maps MCP server (external dependency)
-
-Understanding why each component lives where it does matters for debugging and future architecture decisions.
 
 ---
 
@@ -15,6 +15,22 @@ Understanding why each component lives where it does matters for debugging and f
 |-----------|----------|-----|
 | Fleet Safety Agent | Vertex AI Agent Engine | Serverless, managed scaling, built-in ADK support |
 | Google Maps MCP Server | GKE | Agent Engine blocks subprocess spawning; MCP needs long-lived SSE connections |
+
+---
+
+## Prerequisites
+
+Before deploying, enable these APIs:
+
+```bash
+gcloud services enable \
+  aiplatform.googleapis.com \
+  storage.googleapis.com \
+  cloudresourcemanager.googleapis.com \
+  --project=YOUR_PROJECT_ID
+```
+
+> **Gotcha:** The `cloudresourcemanager.googleapis.com` API is often missed but required at runtime.
 
 ---
 
@@ -29,7 +45,7 @@ Agent Engine is purpose-built for ADK agents. You give it Python code and a requ
 **What you provide:**
 
 - Source packages (`./app`)
-- Requirements file
+- Requirements file (`app/app_utils/requirements-deploy.txt`)
 - Entrypoint module and object
 - Environment variables
 
@@ -47,6 +63,7 @@ Agent Engine is purpose-built for ADK agents. You give it Python code and a requ
 - **Python 3.12** — check your dependencies support it
 - **Reserved env vars** — `GOOGLE_CLOUD_PROJECT`, `GOOGLE_API_KEY` are managed by the platform
 - **Startup time** — first request can take 30-60s (cold start)
+- **Import-time code runs during build** — env checks at module level will fail
 
 ### GKE: Full Control
 
@@ -154,28 +171,20 @@ The deploy script filters certain variables:
 | `MCP_SERVER_URL` | **Passed through** — Needed for MCP connection |
 | Everything else | **Passed through** |
 
-### GKE Deployment (MCP Server)
+### Requirements File
 
-See [HANDOVER_GOOGLE_MAPS_MCP.md](HANDOVER_GOOGLE_MAPS_MCP.md) for the full setup. Key points:
+The deployment requirements are in `app/app_utils/requirements-deploy.txt` (not `.requirements.txt` which is gitignored).
 
-```bash
-# Create cluster (one-time)
-gcloud container clusters create-auto google-maps-cluster \
-  --location=europe-west2
+Key packages that must be included:
 
-# Create secret for Maps API key
-kubectl create secret generic google-maps-api-key \
-  --from-literal=key=YOUR_KEY
-
-# Deploy (via GitHub Actions or manually)
-kubectl apply -f k8s/deployment.yaml
+```text
+google-cloud-aiplatform[adk,agent_engines]>=1.118.0
+vertexai>=1.0.0
+google-adk[eval]>=1.15.0
+mcp>=1.22.0
 ```
 
-**Critical gotchas:**
-
-- Use `pip install uv` in Dockerfile, not `COPY --from=ghcr.io/astral-sh/uv` (DNS failures)
-- Add liveness/readiness probes (k8s can't detect unhealthy pods otherwise)
-- Use commit SHA tags, not just `latest` (otherwise pods won't update)
+> **Gotcha:** The `vertexai` package must be explicitly listed even though it's part of `google-cloud-aiplatform`. The Agent Engine container doesn't always resolve it correctly.
 
 ---
 
@@ -203,35 +212,176 @@ GitHub Actions                    Google Cloud
      ├────────────────────────────────►│
 ```
 
-### Reusing WIF Across Repos
+### GitHub Secrets Required
 
-If your WIF is configured with `attribute.repository_owner == 'YOUR_USERNAME'`, any repo under that account can authenticate. No per-repo setup.
+| Secret | Description | Example |
+|--------|-------------|---------|
+| `GCP_PROJECT_ID` | Your GCP project ID | `my-project-123` |
+| `GCP_WORKLOAD_IDENTITY_PROVIDER` | Full provider path | `projects/123456789/locations/global/workloadIdentityPools/github-pool-v2/providers/github-provider-v2` |
+| `GCP_SERVICE_ACCOUNT` | Service account email | `github-actions-sa@my-project.iam.gserviceaccount.com` |
+| `MCP_SERVER_URL` | Remote MCP server endpoint | `http://XX.XX.X.XXX/sse` |
 
-**GitHub secrets needed (same for all repos):**
+> **Critical:** The `GCP_WORKLOAD_IDENTITY_PROVIDER` must use the **project number** (e.g., `123456789`), not the project ID.
 
-| Secret | Description |
-|--------|-------------|
-| `GCP_PROJECT_ID` | Your GCP project ID |
-| `GCP_WORKLOAD_IDENTITY_PROVIDER` | `projects/PROJECT_NUM/locations/global/workloadIdentityPools/POOL/providers/PROVIDER` |
-| `GCP_SERVICE_ACCOUNT` | `sa-name@project.iam.gserviceaccount.com` |
+### WIF Setup
 
-### Workflow Comparison
+```bash
+PROJECT_ID=your-project-id
+PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format='value(projectNumber)')
+POOL_NAME=github-pool
+PROVIDER_NAME=github-provider
+SA_NAME=github-actions-sa
 
-| Aspect | Agent Engine (`deploy.yml`) | GKE (MCP Server) |
-|--------|----------------------------|------------------|
-| **Build step** | None (Agent Engine builds) | Docker build + push |
-| **Deploy step** | `deploy.py` script | `kubectl apply` |
-| **Secrets passed** | Via `--set-env-vars` | Via k8s Secret |
-| **Health check** | Managed by Agent Engine | Your responsibility |
-| **Rollback** | Redeploy previous version | `kubectl rollout undo` |
+# Create pool
+gcloud iam workload-identity-pools create $POOL_NAME \
+  --location="global" \
+  --project=$PROJECT_ID
+
+# Create provider
+gcloud iam workload-identity-pools providers create-oidc $PROVIDER_NAME \
+  --location="global" \
+  --workload-identity-pool=$POOL_NAME \
+  --issuer-uri="https://token.actions.githubusercontent.com" \
+  --attribute-mapping="google.subject=assertion.sub,attribute.repository_owner=assertion.repository_owner,attribute.repository=assertion.repository" \
+  --attribute-condition="assertion.repository_owner == 'YOUR_GITHUB_USERNAME'" \
+  --project=$PROJECT_ID
+
+# Create service account
+gcloud iam service-accounts create $SA_NAME \
+  --display-name="GitHub Actions" \
+  --project=$PROJECT_ID
+
+# Grant required roles
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:$SA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/aiplatform.admin"
+
+gcloud projects add-iam-policy-binding $PROJECT_ID \
+  --member="serviceAccount:$SA_NAME@$PROJECT_ID.iam.gserviceaccount.com" \
+  --role="roles/storage.admin"
+```
+
+### Service Account Binding (Per-Repo)
+
+This is the step most people miss. The service account needs to allow the WIF pool to impersonate it:
+
+```bash
+# Option A: Allow specific repo
+gcloud iam service-accounts add-iam-policy-binding \
+  $SA_NAME@$PROJECT_ID.iam.gserviceaccount.com \
+  --role="roles/iam.workloadIdentityUser" \
+  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/$POOL_NAME/attribute.repository/YOUR_GITHUB_USERNAME/YOUR_REPO_NAME" \
+  --project=$PROJECT_ID
+
+# Option B: Allow all repos under your account
+gcloud iam service-accounts add-iam-policy-binding \
+  $SA_NAME@$PROJECT_ID.iam.gserviceaccount.com \
+  --role="roles/iam.workloadIdentityUser" \
+  --member="principalSet://iam.googleapis.com/projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/$POOL_NAME/attribute.repository_owner/YOUR_GITHUB_USERNAME" \
+  --project=$PROJECT_ID
+```
+
+### Verify WIF Setup
+
+```bash
+# List pools
+gcloud iam workload-identity-pools list --location=global --project=$PROJECT_ID
+
+# Check pool status (watch for DELETED state!)
+gcloud iam workload-identity-pools describe $POOL_NAME \
+  --location=global --project=$PROJECT_ID
+
+# List providers
+gcloud iam workload-identity-pools providers list \
+  --workload-identity-pool=$POOL_NAME \
+  --location=global --project=$PROJECT_ID
+
+# Check service account bindings
+gcloud iam service-accounts get-iam-policy \
+  $SA_NAME@$PROJECT_ID.iam.gserviceaccount.com \
+  --project=$PROJECT_ID
+```
+
+---
+
+## Common Deployment Errors
+
+### "invalid_target" WIF Error
+
+```text
+failed to generate Google Cloud federated token: {"error":"invalid_target"}
+```
+
+**Causes:**
+
+1. Wrong project number (using project ID instead)
+2. Pool or provider is DELETED (check with `describe` command)
+3. Pool/provider name typo
+4. Missing service account binding for this repo
+
+**Fix:**
+
+```bash
+# Verify the full path
+gcloud iam workload-identity-pools providers describe $PROVIDER_NAME \
+  --workload-identity-pool=$POOL_NAME \
+  --location=global \
+  --project=$PROJECT_ID \
+  --format="value(name)"
+```
+
+### "No module named 'vertexai'"
+
+The Agent Engine container couldn't find the `vertexai` package.
+
+**Fix:** Add `vertexai>=1.0.0` to `app/app_utils/requirements-deploy.txt`.
+
+### "GOOGLE_API_KEY is not set"
+
+Your code has import-time env checks that fail during the deploy script's import phase.
+
+**Fix:** Add dummy env vars to the CI workflow:
+
+```yaml
+env:
+  GOOGLE_API_KEY: "placeholder-for-import"
+  GOOGLE_MAPS_API_KEY: "placeholder-for-import"
+```
+
+### "GOOGLE_MAPS_API_KEY is not set but required"
+
+The env check doesn't know you're using a remote MCP server.
+
+**Fix:** Update env check logic to skip if `MCP_SERVER_URL` is set (already done in this codebase).
+
+### "Cloud Resource Manager API has not been used"
+
+Missing API enablement.
+
+**Fix:**
+
+```bash
+gcloud services enable cloudresourcemanager.googleapis.com --project=$PROJECT_ID
+```
+
+### "The Reasoning Engine failed to be updated"
+
+Generic error. Check Cloud Logs for the real issue:
+
+```bash
+gcloud logging read \
+  "resource.type=aiplatform.googleapis.com/ReasoningEngine" \
+  --project=$PROJECT_ID \
+  --limit=20 \
+  --format="table(timestamp,textPayload)" \
+  --freshness=10m
+```
 
 ---
 
 ## Debugging Production Issues
 
-### Agent Engine Logs & Issues
-
-**Logs:**
+### Agent Engine Logs
 
 ```bash
 # Via gcloud
@@ -242,37 +392,17 @@ gcloud logging read "resource.type=aiplatform.googleapis.com/ReasoningEngine" \
 # Filter: resource.type="aiplatform.googleapis.com/ReasoningEngine"
 ```
 
-**Common issues:**
-
-| Symptom | Likely cause |
-|---------|--------------|
-| Cold start timeout | Dependencies too heavy; check requirements |
-| `GOOGLE_API_KEY not set` | You're using API key auth; switch to `vertexai.init()` |
-| `Connection closed` to MCP | MCP server down or `MCP_SERVER_URL` wrong |
-| `subprocess blocked` | You're trying to spawn a process; use SSE transport |
-
 ### GKE (MCP Server)
-
-**Logs:**
 
 ```bash
 kubectl logs -l app=google-maps-mcp-server --tail=100 -f
 ```
 
-**Common issues:**
-
-| Symptom | Likely cause |
-|---------|--------------|
-| Pod `CrashLoopBackOff` | Missing secret, bad health endpoint, or crash on startup |
-| 307 redirect on `/sse` | ASGI middleware misconfigured |
-| `ImagePullBackOff` | Wrong image path or missing push |
-| No external IP | LoadBalancer provisioning (wait 2-3 mins) |
-
 ---
 
 ## Cost Considerations
 
-### Agent Engine Costs
+### Agent Engine
 
 - Billed per vCPU-hour and memory-hour while instances are running
 - `min_instances=1` means you pay 24/7 for at least one instance
@@ -285,8 +415,6 @@ kubectl logs -l app=google-maps-mcp-server --tail=100 -f
 - Billed per pod resource request
 - No cluster management fee
 - Scales to zero if no pods
-
-**Recommendation:** Use resource requests that match actual usage. Don't over-provision.
 
 ### Google Maps APIs
 
@@ -306,10 +434,9 @@ kubectl logs -l app=google-maps-mcp-server --tail=100 -f
 | **Cold start** | None | 30-60s first request |
 | **Debugging** | Full traces in Web UI | Cloud Logging |
 
-**Tip:** Always test with `MCP_SERVER_URL` locally before deploying. This catches MCP connectivity issues early.
+**Tip:** Always test with `MCP_SERVER_URL` locally before deploying:
 
 ```bash
-# Local with remote MCP (mirrors production)
 export MCP_SERVER_URL=http://XX.XX.X.XXX/sse
 make playground
 ```
@@ -323,7 +450,6 @@ make playground
 - [ ] **API key restrictions** — restrict Maps key to specific APIs and IPs
 - [ ] **Least privilege** — service accounts have only required roles
 - [ ] **Secrets in k8s** — not in manifests or env vars
-- [ ] **MCP server not public** — consider VPC peering for production
 
 ---
 
@@ -353,14 +479,13 @@ uv run python scripts/query_deployed_agent.py --query "Fleet status?"
 curl http://YOUR_MCP_IP/health
 ```
 
-### View MCP Logs
+### View Logs
 
 ```bash
+# Agent Engine
+gcloud logging read "resource.type=aiplatform.googleapis.com/ReasoningEngine" \
+  --project=YOUR_PROJECT --limit=20 --freshness=10m
+
+# MCP Server
 kubectl logs -l app=google-maps-mcp-server -f
-```
-
-### Restart MCP Server
-
-```bash
-kubectl rollout restart deployment/google-maps-mcp-server
 ```
