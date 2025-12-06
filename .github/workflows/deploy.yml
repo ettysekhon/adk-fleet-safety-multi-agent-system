@@ -44,7 +44,6 @@ jobs:
             contents: read
             id-token: write
         env:
-            # Dummy values for import-time env checks (Agent Engine uses service account auth)
             GOOGLE_API_KEY: "placeholder-for-import"
             GOOGLE_MAPS_API_KEY: "placeholder-for-import"
 

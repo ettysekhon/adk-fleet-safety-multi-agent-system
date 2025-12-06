@@ -185,7 +185,7 @@ def print_deployment_success(
 )
 @click.option(
     "--requirements-file",
-    default="app/app_utils/.requirements.txt",
+    default="app/app_utils/requirements-deploy.txt",
     help="Path to requirements.txt file",
 )
 @click.option(
